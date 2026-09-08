@@ -26,7 +26,7 @@ HTML_TEMPLATE = """
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Cờ Vua AI - Pro Gateway</title>
+<title>Cờ Vua AI - Flexible Gateway</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
@@ -55,22 +55,12 @@ button:hover { opacity: 0.9; }
 <body>
 
 <div class="container">
-    <h1>Cờ Vua AI - Pro Gateway</h1>
+    <h1>Cờ Vua AI - Gateway</h1>
     <div class="card"><div id="board"></div></div>
     <div class="card">
         <div class="form-group">
-            <label>Chọn Provider / Mẫu nhanh</label>
-            <select id="providerSelect" onchange="handleProviderChange()">
-                <option value="custom">Tùy chỉnh (Custom Endpoint)</option>
-                <option value="https://tabitoken.com/v1">TabiToken</option>
-                <option value="https://api.justwoker.icu/v1">JustWoker API</option>
-                <option value="https://api.openai.com/v1">OpenAI Official</option>
-                <option value="https://api.anthropic.com/v1">Anthropic Official</option>
-            </select>
-        </div>
-        <div class="form-group">
-            <label>API Endpoint (Chat Completions URL)</label>
-            <input type="text" id="apiEndpoint" value="https://tabitoken.com/v1/chat/completions">
+            <label>API Endpoint (Dán đầy đủ URL chat completions)</label>
+            <input type="text" id="apiEndpoint" placeholder="https://api.provider.com/v1/chat/completions" value="https://tabitoken.com/v1/chat/completions">
         </div>
         <div class="row">
             <div class="form-group" style="flex: 2;">
@@ -78,35 +68,29 @@ button:hover { opacity: 0.9; }
                 <input type="password" id="apiKey" placeholder="Dán API Key...">
             </div>
             <div class="form-group" style="flex: 1;">
-                <label>Kiểu Auth Header</label>
+                <label>Auth Type</label>
                 <select id="authType">
-                    <option value="Bearer">Bearer Token</option>
+                    <option value="Bearer">Bearer</option>
                     <option value="x-api-key">x-api-key</option>
                 </select>
             </div>
+        </div>
+        <div class="form-group">
+            <label>Tên Model AI (Có thể tự gõ hoặc bấm Lấy danh sách)</label>
+            <input type="text" id="modelInput" placeholder="vd: claude-opus-5, gpt-4o, ..." value="claude-opus-5">
         </div>
         <div class="row">
             <button class="btn-success" onclick="fetchModels()" style="flex: 1;">Lấy danh sách Model</button>
             <button onclick="testConnection()" style="flex: 1; background: #0d9488;">Test Connect</button>
         </div>
-        <div class="form-group" style="margin-top: 6px;">
-            <label>Chọn Model AI</label>
-            <select id="modelSelect">
-                <option value="claude-opus-5">claude-opus-5 (Nhập trước hoặc bấm Lấy Model)</option>
-            </select>
-        </div>
-        <div class="form-group">
-            <label>Chế độ chơi</label>
-            <select id="gameMode">
-                <option value="pvai">Người vs AI</option>
-            </select>
-        </div>
-        <div class="form-group">
-            <label>Bạn cầm quân</label>
-            <select id="playerColor">
-                <option value="w">Trắng</option>
-                <option value="b">Đen</option>
-            </select>
+        <div class="row" style="margin-top: 6px;">
+            <div class="form-group" style="flex: 1;">
+                <label>Bạn cầm quân</label>
+                <select id="playerColor">
+                    <option value="w">Trắng</option>
+                    <option value="b">Đen</option>
+                </select>
+            </div>
         </div>
         <button id="startBtn" onclick="startGame()">Bắt Đầu Ván Mới</button>
         <button id="stopBtn" class="btn-danger" onclick="stopGame()" style="display: none;">Dừng Trận Đấu</button>
@@ -138,13 +122,6 @@ function chessDotComPieceTheme(piece) {
     return `https://images.chesscomfiles.com/chess-themes/pieces/neo/150/${color}${type}.png`;
 }
 
-function handleProviderChange() {
-    const val = $('#providerSelect').val();
-    if (val !== 'custom') {
-        $('#apiEndpoint').val(val + '/chat/completions');
-    }
-}
-
 function log(type, msg) {
     const time = new Date().toLocaleTimeString();
     const logBox = $('#logBox');
@@ -161,38 +138,37 @@ function getRequestConfig() {
     let endpoint = $('#apiEndpoint').val().trim();
     let apiKey = $('#apiKey').val().trim();
     let authType = $('#authType').val();
-    return { endpoint, apiKey, authType };
+    let model = $('#modelInput').val().trim();
+    return { endpoint, apiKey, authType, model };
 }
 
 async function fetchModels() {
     let cfg = getRequestConfig();
-    if (!cfg.apiKey) { alert('Vui lòng nhập API Key trước!'); return; }
+    if (!cfg.apiKey || !cfg.endpoint) { alert('Vui lòng nhập API Key và Endpoint!'); return; }
     
-    // Tự động suy ra base url lấy models từ chat endpoint
-    let modelsUrl = cfg.endpoint.replace(/\/chat\/completions$/, '/models');
-    log('SYS', `Đang tải danh sách model từ: ${modelsUrl}`);
+    log('SYS', 'Đang quét danh sách model từ server...');
 
     try {
         const res = await fetch('/api/models', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                target_endpoint: modelsUrl,
+                target_endpoint: cfg.endpoint,
                 api_key: cfg.apiKey,
                 auth_type: cfg.authType
             })
         });
         const data = await res.json();
         if (res.ok && data.data) {
-            let select = $('#modelSelect');
-            select.empty();
-            data.data.forEach(m => {
-                select.append(`<option value="${m.id}">${m.id}</option>`);
-            });
-            log('SUCCESS', `Đã tải thành công ${data.data.length} models!`);
-            alert('Đã cập nhật danh sách model thành công!');
+            let modelIds = data.data.map(m => m.id);
+            log('SUCCESS', `Tìm thấy ${modelIds.length} models: ${modelIds.slice(0, 5).join(', ')}...`);
+            // Điền model đầu tiên tìm được vào ô model hoặc hiển thị thông báo
+            if (modelIds.length > 0) {
+                $('#modelInput').val(modelIds[0]);
+                alert(`Đã lấy thành công! Model đầu tiên được tự điền: ${modelIds[0]}`);
+            }
         } else {
-            throw new Error(data.error || 'Không thể lấy danh sách model');
+            throw new Error(data.error || 'Không thể đọc danh sách model');
         }
     } catch (err) {
         log('ERROR', `Lỗi lấy models: ${err.message}`);
@@ -212,7 +188,8 @@ async function testConnection() {
             body: JSON.stringify({
                 target_endpoint: cfg.endpoint,
                 api_key: cfg.apiKey,
-                auth_type: cfg.authType
+                auth_type: cfg.authType,
+                model: cfg.model
             })
         });
         const text = await res.text();
@@ -261,6 +238,7 @@ function startGame() {
     let cfg = getRequestConfig();
     if (!cfg.apiKey) { alert('Vui lòng nhập API Key!'); return; }
     if (!cfg.endpoint) { alert('Vui lòng nhập Endpoint!'); return; }
+    if (!cfg.model) { alert('Vui lòng nhập tên Model!'); return; }
 
     game.reset();
     isRunning = true;
@@ -295,17 +273,16 @@ function stopGame() {
 async function triggerAiMove() {
     if (!isRunning || game.game_over()) return;
     let cfg = getRequestConfig();
-    let modelName = $('#modelSelect').val();
 
-    updateStatus(`AI (${modelName}) đang suy nghĩ...`);
+    updateStatus(`AI (${cfg.model}) đang suy nghĩ...`);
     const possibleMoves = game.moves();
     const promptText = `Trạng thái FEN: "${game.fen()}". Nước hợp lệ: [${possibleMoves.join(', ')}]. Chọn 1 nước đi tốt nhất dạng SAN (vd: e4, Nf3). Chỉ trả lời duy nhất mã nước đi.`;
 
-    log('API_REQ', `Model: ${modelName} | Gửi request qua Proxy...`);
+    log('API_REQ', `Model: ${cfg.model} | Gửi request qua Proxy...`);
 
     try {
         const payload = {
-            model: modelName,
+            model: cfg.model,
             messages: [{ role: 'user', content: promptText }],
             temperature: 0.2,
             target_endpoint: cfg.endpoint,
@@ -375,9 +352,17 @@ def build_auth_header(auth_type, api_key):
 def api_models():
     try:
         data = request.get_json()
-        target_url = data.get('target_endpoint')
-        api_key = data.get('api_key')
+        target_url = data.get('target_endpoint', '')
+        api_key = data.get('api_key', '')
         auth_type = data.get('auth_type', 'Bearer')
+
+        # Tự động suy ra endpoint /models từ chat endpoint
+        if '/chat/completions' in target_url:
+            models_url = target_url.replace('/chat/completions', '/models')
+        elif target_url.endswith('/'):
+            models_url = target_url + 'models'
+        else:
+            models_url = target_url + '/models'
 
         headers = build_auth_header(auth_type, api_key)
         headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"
@@ -385,8 +370,15 @@ def api_models():
         chosen_proxy = get_next_proxy()
         proxies = {"http": chosen_proxy, "https": chosen_proxy}
 
-        response = crequests.get(target_url, headers=headers, proxies=proxies, impersonate="chrome120", timeout=20)
-        return response.text, response.status_code, [('Content-Type', 'application/json')]
+        response = crequests.get(models_url, headers=headers, proxies=proxies, impersonate="chrome120", timeout=20)
+        
+        try:
+            response.json()
+            return response.text, response.status_code, [('Content-Type', 'application/json')]
+        except json.JSONDecodeError:
+            snippet = response.text[:200].replace('\n', ' ')
+            return jsonify({"error": f"Server không trả về JSON (HTTP {response.status_code}): {snippet}"}), 500
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -397,13 +389,13 @@ def api_test():
         target_url = data.get('target_endpoint')
         api_key = data.get('api_key')
         auth_type = data.get('auth_type', 'Bearer')
+        model = data.get('model', 'gpt-3.5-turbo')
 
         headers = build_auth_header(auth_type, api_key)
         headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"
 
-        # Gửi test request nhẹ nhàng
         payload = {
-            "model": "gpt-3.5-turbo", # Hoặc model mặc định bất kỳ
+            "model": model,
             "messages": [{"role": "user", "content": "hi"}],
             "max_tokens": 5
         }
@@ -412,7 +404,7 @@ def api_test():
         proxies = {"http": chosen_proxy, "https": chosen_proxy}
 
         response = crequests.post(target_url, headers=headers, json=payload, proxies=proxies, impersonate="chrome120", timeout=20)
-        if response.status_code in [200, 400, 404, 422]: # Các mã này chứng tỏ endpoint đã phản hồi hợp lệ qua mạng
+        if response.status_code in [200, 400, 404, 422]:
             return jsonify({"status": "ok", "code": response.status_code}), 200
         return response.text, response.status_code
     except Exception as e:
