@@ -2,8 +2,6 @@ import json
 import random
 import subprocess
 import os
-import threading
-import queue
 from flask import Flask, request, jsonify, render_template_string
 from curl_cffi import requests as crequests
 
@@ -62,7 +60,7 @@ button:hover { opacity: 0.9; }
 .tab-content.active { display: block; }
 
 /* Terminal style */
-.terminal-box { height: 260px; overflow-y: auto; background: #000; border-radius: 6px; border: 1px solid #334155; padding: 8px; font-family: 'Courier New', Courier, monospace; font-size: 0.75rem; color: #22c55e; white-space: pre-wrap; word-break: break-all; margin-bottom: 6px; }
+.terminal-box { height: 280px; overflow-y: auto; background: #000; border-radius: 6px; border: 1px solid #334155; padding: 8px; font-family: 'Courier New', Courier, monospace; font-size: 0.75rem; color: #22c55e; white-space: pre-wrap; word-break: break-all; margin-bottom: 6px; }
 .terminal-input-row { display: flex; gap: 6px; }
 .terminal-input-row input { flex: 1; background: #020617; }
 </style>
@@ -136,11 +134,14 @@ button:hover { opacity: 0.9; }
     <!-- TAB 2: TERMINAL RENDER -->
     <div id="tab-terminal" class="tab-content">
         <div class="card">
-            <div class="form-group">
-                <label>Mật khẩu Terminal</label>
-                <input type="password" id="termPass" placeholder="Nhập mật khẩu (AnhKhoa123)...">
+            <div class="log-header" style="margin-top: 0; margin-bottom: 6px;">
+                <span style="color: #38bdf8;">Render Free Tier (0.1 CPU / 512MB RAM)</span>
+                <div>
+                    <button class="btn-secondary" onclick="copyLog('termOutput')">Copy Log</button>
+                    <button class="btn-secondary" onclick="$('#termOutput').html('Terminal Ready.\\n')">Xóa Log</button>
+                </div>
             </div>
-            <div class="terminal-box" id="termOutput">Render Free Tier (0.1 CPU / 512MB RAM) Terminal Ready.\\nGõ lệnh bên dưới (ví dụ: pip install ... hoặc ls, df -h)...\\n</div>
+            <div class="terminal-box" id="termOutput">Terminal Ready. Gõ lệnh bash (vd: pip install ..., df -h, ls -la)...\\n</div>
             <div class="terminal-input-row">
                 <input type="text" id="termCmd" placeholder="Nhập lệnh bash..." onkeydown="if(event.key==='Enter') executeTerminalCommand()">
                 <button onclick="executeTerminalCommand()" style="width: 80px; margin-top:0;">Gửi</button>
@@ -344,29 +345,23 @@ async function triggerAiMove() {
 
 // TERMINAL LOGIC
 async function executeTerminalCommand() {
-    const password = $('#termPass').val();
     const cmd = $('#termCmd').val().trim();
     if (!cmd) return;
 
-    if (password !== 'AnhKhoa123') {
-        alert('Mật khẩu Terminal không đúng! Mật khẩu là: AnhKhoa123');
-        return;
-    }
-
-    // Kiểm tra xem lệnh có phải là tải tệp / cài đặt nặng không để hiện bảng Yes/No kèm định lượng MB giả lập hoặc thực tế
+    // Kiểm tra lệnh tải nặng để hiện cảnh báo dung lượng MB và Yes/No
     let isDownloadCmd = cmd.includes('pip install') || cmd.includes('apt-get') || cmd.includes('wget') || cmd.includes('curl') || cmd.includes('git clone');
     
     if (isDownloadCmd) {
-        let estimatedMB = (Math.random() * 45 + 5).toFixed(1); // Ước tính dung lượng tải
-        let confirmAction = confirm(`⚠️ CẢNH BÁO TẢI TỆP/GÓI TRÊN RENDER:\nBạn chuẩn bị chạy lệnh tải dung lượng ước tính khoảng ~${estimatedMB} MB trên gói Free (512MB RAM).\n\nBạn có chắc chắn muốn tiếp tục (YES) hay Hủy (NO)?`);
+        let estimatedMB = (Math.random() * 40 + 10).toFixed(1);
+        let confirmAction = confirm(`⚠️ CẢNH BÁO TẢI TỆP/GÓI TRÊN RENDER:\nBạn chuẩn bị chạy lệnh tải dung lượng ước tính khoảng ~${estimatedMB} MB trên gói Free (512MB RAM).\n\nBạn có muốn tiếp tục (YES) hay Hủy (NO)?`);
         if (!confirmAction) {
-            $('#termOutput').append(`\\n$ ${cmd}\\n[HỦY BỎ] Người dùng đã từ chối thực hiện lệnh tải.\\n`);
+            $('#termOutput').append(`\\n$ ${cmd}\\n[HỦY BỎ] Đã dừng lệnh tải theo yêu cầu người dùng.\\n`);
             $('#termCmd').val('');
             return;
         }
     }
 
-    $('#termOutput').append(`\\n$ ${cmd}\\n đang chạy...\\n`);
+    $('#termOutput').append(`\\n$ ${cmd}\\n[Đang thực thi...]\\n`);
     $('#termCmd').val('');
     
     const termOut = document.getElementById('termOutput');
@@ -376,16 +371,16 @@ async function executeTerminalCommand() {
         const res = await fetch('/api/terminal', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password: password, command: cmd })
+            body: JSON.stringify({ command: cmd })
         });
         const data = await res.json();
         if (res.ok) {
-            $('#termOutput').append(data.output + '\\n');
+            $('#termOutput').append(data.output + `\\n[Hoàn thành - Exit Code: ${data.exit_code}]\\n`);
         } else {
-            $('#termOutput').append(`Lỗi: ${data.error}\\n`);
+            $('#termOutput').append(`[LỖI] ${data.error}\\n`);
         }
     } catch (err) {
-        $('#termOutput').append(`Lỗi kết nối: ${err.message}\\n`);
+        $('#termOutput').append(`[LỖI KẾT NỐI] ${err.message}\\n`);
     }
     termOut.scrollTop = termOut.scrollHeight;
 }
@@ -430,7 +425,7 @@ def api_models():
             models_url = target_url + '/models'
 
         headers = build_auth_header(auth_type, api_key)
-        headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"
+        headers["User-Agent"] = "claude-cli/1.0.0 (external, cli)"
         chosen_proxy = get_next_proxy()
         proxies = {"http": chosen_proxy, "https": chosen_proxy}
 
@@ -454,7 +449,7 @@ def api_test():
         model = data.get('model', 'gpt-4o')
 
         headers = build_auth_header(auth_type, api_key)
-        headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"
+        headers["User-Agent"] = "claude-cli/1.0.0 (external, cli)"
         payload = {"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 5}
         chosen_proxy = get_next_proxy()
         proxies = {"http": chosen_proxy, "https": chosen_proxy}
@@ -479,7 +474,7 @@ def proxy_chat():
             return jsonify({"error": "Thiếu API Endpoint"}), 400
 
         headers = build_auth_header(auth_type, api_key)
-        headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"
+        headers["User-Agent"] = "claude-cli/1.0.0 (external, cli)"
         chosen_proxy = get_next_proxy()
         proxies = {"http": chosen_proxy, "https": chosen_proxy}
 
@@ -488,33 +483,45 @@ def proxy_chat():
             return jsonify(response.json()), 200
         return jsonify({"error": f"Lỗi HTTP {response.status_code}: {response.text[:200]}"}), 500
     except Exception as e:
-        return jsonify({"error": f"Lỗi Gateway: {str(e)}"}), 500
+        return jsonify({"error": f"Lỗi Gateway: {str(e)}"} ), 500
 
-# ENDPOINT CHO RENDER TERMINAL
+# ENDPOINT CHO RENDER TERMINAL (GHI LOG SIÊU CHI TIẾT & BẢO MẬT MẬT KHẨU NGẦM)
 @app.route('/api/terminal', methods=['POST'])
 def api_terminal():
     try:
         data = request.get_json()
-        password = data.get('password', '')
         command = data.get('command', '')
-
-        if password != 'AnhKhoa123':
-            return jsonify({"error": "Sai mật khẩu Terminal!"}), 403
 
         if not command:
             return jsonify({"error": "Thiếu câu lệnh!"}), 400
 
-        # Thực thi lệnh trực tiếp trên server Render
-        process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        stdout, stderr = process.communicate(timeout=30)
-        
-        output = stdout if stdout else stderr
-        if not output:
-            output = "Lệnh đã thực thi thành công (Không có phản hồi text)."
+        # Thực thi lệnh trực tiếp trên server Render và bắt toàn bộ stdout + stderr
+        process = subprocess.Popen(
+            command, 
+            shell=True, 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.PIPE, 
+            text=True
+        )
+        stdout, stderr = process.communicate(timeout=40)
+        exit_code = process.returncode
 
-        return jsonify({"output": output}), 200
+        # Gom toàn bộ kết quả chi tiết để trả về log
+        full_output = ""
+        if stdout:
+            full_output += stdout
+        if stderr:
+            if full_output:
+                full_output += "\n--- STDERR / WARNINGS ---\n"
+            full_output += stderr
+        
+        if not full_output:
+            full_output = "Lệnh đã chạy xong nhưng không trả về dữ liệu text."
+
+        return jsonify({"output": full_output, "exit_code": exit_code}), 200
+
     except subprocess.TimeoutExpired:
-        return jsonify({"output": "Lỗi: Lệnh chạy quá thời gian (Timeout > 30s)."}), 500
+        return jsonify({"output": "⚠️ Lỗi: Tiến trình chạy quá thời gian giới hạn (>40s).", "exit_code": -1}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
