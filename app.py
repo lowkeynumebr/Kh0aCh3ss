@@ -84,7 +84,7 @@ button:hover { opacity: 0.9; }
         <div class="card"><div id="board"></div></div>
         <div class="card">
             <div class="form-group">
-                <label>Tên Provider (Nhà cung cấp - Khuyên dùng không dấu)</label>
+                <label>Tên Provider (Nhà cung cấp - Không dấu)</label>
                 <input type="text" id="providerName" value="OpenAI">
             </div>
             <div class="form-group">
@@ -297,7 +297,6 @@ function onSelectedModelChange() {
     $('#apiEndpoint').val(info.endpoint);
     $('#apiKey').val(info.apiKey);
     $('#authType').val(info.authType);
-    log('SYS', `Đã tự động cấu hình theo Model: ${mId}`);
 }
 
 function onBlackModelChange() {
@@ -314,7 +313,7 @@ async function fetchModels() {
     let endpoint = $('#apiEndpoint').val().trim();
     let apiKey = $('#apiKey').val().trim();
     let authType = $('#authType').val();
-    let provider = $('#providerName').val().trim() || 'Custom Provider';
+    let provider = $('#providerName').val().trim() || 'Custom';
 
     if (!apiKey) { alert('Vui lòng nhập API Key trước khi quét!'); return; }
     if (!endpoint) { alert('Vui lòng nhập API Endpoint!'); return; }
@@ -344,7 +343,7 @@ async function fetchModels() {
             localStorage.setItem('ai_chess_model_registry', JSON.stringify(modelRegistry));
             renderModelSelects();
 
-            log('SUCCESS', `Quét thành công! Thêm mới ${countNew} model. Tổng kho hiện có: ${Object.keys(modelRegistry).length} models.`);
+            log('SUCCESS', `Quét thành công! Thêm mới ${countNew} model. Tổng kho: ${Object.keys(modelRegistry).length}`);
             alert(`Quét thành công qua [${provider}]!\nĐã cộng dồn vào kho vĩnh viễn.`);
         } else {
             throw new Error(data.error || 'Không tìm thấy model nào.');
@@ -404,7 +403,7 @@ function handleSquareClick(square) {
         if (move !== null) {
             board.position(game.fen());
             log('MOVE', `Bạn đi: ${move.san}`);
-            if (isRunning && !game.game_over()) setTimeout(triggerAiMove, 300);
+            if (isRunning && !game.game_over()) setTimeout(triggerAiMove, 200);
         } else {
             const piece = game.get(square);
             if (piece && piece.color === playerColor) handleSquareClick(square);
@@ -445,7 +444,7 @@ function startGame() {
     updateStatus('Đang trong trận đấu');
 
     if (mode === 'ai_vs_ai') {
-        setTimeout(triggerAiVsAiMove, 500);
+        setTimeout(triggerAiVsAiMove, 400);
     } else {
         const playerColor = $('#playerColor').val();
         if (playerColor === 'b') triggerAiMove();
@@ -463,7 +462,7 @@ function stopGame() {
     updateStatus('Đã dừng');
 }
 
-async function triggerAiMove() {
+async function triggerAiMove(retryCount = 0) {
     if (!isRunning || game.game_over()) return;
     let model = $('#savedModelSelect').val();
     let info = modelRegistry[model];
@@ -471,9 +470,9 @@ async function triggerAiMove() {
 
     updateStatus(`AI (${model}) đang suy nghĩ...`);
     const possibleMoves = game.moves();
-    const promptText = `You are playing chess. Current FEN: ${game.fen()}. Legal moves: ${possibleMoves.join(', ')}. Choose the best move in SAN format (e.g. e4, Nf3). Reply with ONLY the move notation.`;
+    const promptText = `Current FEN: ${game.fen()}. Legal moves: ${possibleMoves.join(', ')}. Reply with ONLY the best move in SAN format (e.g. e4, Nf3).`;
 
-    log('API_REQ', `Model: ${model} | Gửi request...`);
+    log('API_REQ', `Model: ${model} | Gửi request... (Lần thử: ${retryCount + 1})`);
     try {
         const res = await fetch('/api/chat', {
             method: 'POST',
@@ -481,7 +480,8 @@ async function triggerAiMove() {
             body: JSON.stringify({
                 model: model,
                 messages: [{ role: 'user', content: promptText }],
-                temperature: 0.2,
+                temperature: 0.1,
+                max_tokens: 15,
                 target_endpoint: info.endpoint,
                 api_key: info.apiKey,
                 auth_type: info.authType
@@ -506,12 +506,18 @@ async function triggerAiMove() {
         else if (game.in_draw()) { updateStatus('Hòa!'); stopGame(); }
         else if (isRunning) { updateStatus('Đến lượt bạn'); }
     } catch (err) {
-        log('ERROR', `Lỗi: ${err.message}`);
-        stopGame();
+        log('WARN', `Lỗi mạng/API: ${err.message}`);
+        if (retryCount < 2 && isRunning) {
+            log('SYSTEM', `Đang tự động thử lại sau 2 giây (${retryCount + 1}/3)...`);
+            aiTimeout = setTimeout(() => triggerAiMove(retryCount + 1), 2000);
+        } else {
+            log('ERROR', 'Đã thử lại nhiều lần nhưng thất bại. Dừng ván đấu.');
+            stopGame();
+        }
     }
 }
 
-async function triggerAiVsAiMove() {
+async function triggerAiVsAiMove(retryCount = 0) {
     if (!isRunning || game.game_over()) return;
     
     let turn = game.turn();
@@ -521,9 +527,9 @@ async function triggerAiVsAiMove() {
 
     updateStatus(`AI ${turn === 'w' ? 'Trắng' : 'Đen'} (${model}) đang suy nghĩ...`);
     const possibleMoves = game.moves();
-    const promptText = `You are playing chess as ${turn === 'w' ? 'White' : 'Black'}. Current FEN: ${game.fen()}. Legal moves: ${possibleMoves.join(', ')}. Choose the best move in SAN format (e.g. e4, Nf3). Reply with ONLY the move notation.`;
+    const promptText = `Current FEN: ${game.fen()}. Legal moves: ${possibleMoves.join(', ')}. Reply with ONLY the best move in SAN format (e.g. e4, Nf3).`;
 
-    log('API_REQ', `AI ${turn === 'w' ? 'Trắng' : 'Đen'} [Model: ${model}] | Gửi request...`);
+    log('API_REQ', `AI ${turn === 'w' ? 'Trắng' : 'Đen'} [Model: ${model}] | Gửi request... (Thử: ${retryCount + 1})`);
     try {
         const res = await fetch('/api/chat', {
             method: 'POST',
@@ -531,7 +537,8 @@ async function triggerAiVsAiMove() {
             body: JSON.stringify({
                 model: model,
                 messages: [{ role: 'user', content: promptText }],
-                temperature: 0.2,
+                temperature: 0.1,
+                max_tokens: 15,
                 target_endpoint: info.endpoint,
                 api_key: info.apiKey,
                 auth_type: info.authType
@@ -555,13 +562,16 @@ async function triggerAiVsAiMove() {
         if (game.in_checkmate()) { updateStatus('Chiếu bí!'); stopGame(); }
         else if (game.in_draw()) { updateStatus('Hòa!'); stopGame(); }
         else if (isRunning) {
-            aiTimeout = setTimeout(triggerAiVsAiMove, 600);
+            aiTimeout = setTimeout(triggerAiVsAiMove, 300);
         }
     } catch (err) {
-        log('ERROR', `Lỗi AI vs AI: ${err.message}`);
-        if (isRunning) {
-            log('SYSTEM', 'Thử lại lượt đi sau 3 giây...');
-            aiTimeout = setTimeout(triggerAiVsAiMove, 3000);
+        log('WARN', `Lỗi AI vs AI: ${err.message}`);
+        if (retryCount < 2 && isRunning) {
+            log('SYSTEM', 'Tự động thử lại lượt đi sau 2 giây...');
+            aiTimeout = setTimeout(() => triggerAiVsAiMove(retryCount + 1), 2000);
+        } else {
+            log('ERROR', 'Thất bại sau nhiều lần thử. Dừng ván.');
+            stopGame();
         }
     }
 }
@@ -575,7 +585,7 @@ async function executeTerminalCommand() {
         let estimatedMB = (Math.random() * 40 + 10).toFixed(1);
         let confirmAction = confirm(`⚠️ CẢNH BÁO TẢI TỆP/GÓI TRÊN RENDER:\\nBạn chuẩn bị chạy lệnh tải dung lượng khoảng ~${estimatedMB} MB trên gói Free (512MB RAM).\\n\\nBạn có muốn tiếp tục (YES) hay Hủy (NO)?`);
         if (!confirmAction) {
-            $('#termOutput').append(`\\n$ ${cmd}\\n[HỦY BỎ] Đã dừng lệnh tải theo yêu cầu người dùng.\\n`);
+            $('#termOutput').append(`\\n$ ${cmd}\\n[HỦY BỎ] Đã dừng lệnh tải.\\n`);
             $('#termCmd').val('');
             return;
         }
@@ -648,7 +658,6 @@ def api_models():
         models_url = f"{base_url}/models"
 
         headers = build_auth_header(auth_type, api_key)
-        # Ép chuỗi User-Agent sang ASCII chuẩn để tránh lỗi mã hóa ký tự Latin-1
         headers["User-Agent"] = "claude-cli/1.0.0 (external, cli)"
         
         chosen_proxy = get_next_proxy()
@@ -702,7 +711,7 @@ def api_test():
         chosen_proxy = get_next_proxy()
         proxies = {"http": chosen_proxy, "https": chosen_proxy}
 
-        response = crequests.post(chat_url, headers=headers, json=payload, proxies=proxies, impersonate="chrome120", timeout=20, allow_redirects=False)
+        response = crequests.post(chat_url, headers=headers, json=payload, proxies=proxies, impersonate="chrome120", timeout=15, allow_redirects=False)
         if response.status_code in [200, 400, 404, 422, 403]:
             return jsonify({"status": "ok", "code": response.status_code, "error": response.text[:200]}), 200
         return jsonify({"error": response.text[:200]}), response.status_code
@@ -729,7 +738,8 @@ def proxy_chat():
         chosen_proxy = get_next_proxy()
         proxies = {"http": chosen_proxy, "https": chosen_proxy}
 
-        response = crequests.post(chat_url, headers=headers, json=payload, proxies=proxies, impersonate="chrome120", timeout=60, allow_redirects=False)
+        # Giảm timeout xuống 25s để phản hồi nhanh và chủ động bắt lỗi
+        response = crequests.post(chat_url, headers=headers, json=payload, proxies=proxies, impersonate="chrome120", timeout=25, allow_redirects=False)
         if response.status_code == 200:
             return jsonify(response.json()), 200
         return jsonify({"error": f"Lỗi HTTP {response.status_code}: {response.text[:200]}"}), 500
