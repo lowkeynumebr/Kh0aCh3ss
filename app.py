@@ -59,6 +59,10 @@ button:hover { opacity: 0.9; }
 .tab-content { display: none; }
 .tab-content.active { display: block; }
 
+/* AI vs AI configs */
+.ai-vs-ai-panel { background: #0f172a; border: 1px dashed #334155; padding: 8px; border-radius: 6px; margin-top: 8px; display: none; }
+.ai-vs-ai-panel h3 { font-size: 0.8rem; color: #38bdf8; margin-bottom: 6px; }
+
 /* Terminal style */
 .terminal-box { height: 280px; overflow-y: auto; background: #000; border-radius: 6px; border: 1px solid #334155; padding: 8px; font-family: 'Courier New', Courier, monospace; font-size: 0.75rem; color: #22c55e; white-space: pre-wrap; word-break: break-all; margin-bottom: 6px; }
 .terminal-input-row { display: flex; gap: 6px; }
@@ -81,11 +85,11 @@ button:hover { opacity: 0.9; }
         <div class="card">
             <div class="form-group">
                 <label>Tên Provider (Nhà cung cấp)</label>
-                <input type="text" id="providerName" value="TabiToken">
+                <input type="text" id="providerName" value="OpenAI / Claude Hub">
             </div>
             <div class="form-group">
                 <label>API Endpoint</label>
-                <input type="text" id="apiEndpoint" value="https://tabitoken.com/v1">
+                <input type="text" id="apiEndpoint" value="https://api.openai.com/v1">
             </div>
             <div class="row">
                 <div class="form-group" style="flex: 2;">
@@ -105,11 +109,18 @@ button:hover { opacity: 0.9; }
                 <input type="text" id="modelInput" value="gpt-4o">
             </div>
             <div class="row">
-                <button class="btn-success" onclick="fetchModels()" style="flex: 1;">Lấy Model</button>
+                <button class="btn-success" onclick="fetchModels()" style="flex: 1;">Lấy Model (Auto)</button>
                 <button onclick="testConnection()" style="flex: 1; background: #0d9488;">Test Connect</button>
             </div>
             <div class="row" style="margin-top: 6px;">
                 <div class="form-group" style="flex: 1;">
+                    <label>Chế độ ván đấu</label>
+                    <select id="gameMode" onchange="toggleAiVsAiPanel()">
+                        <option value="player_vs_ai">Người vs AI</option>
+                        <option value="ai_vs_ai">🤖 AI vs AI (Tự động)</option>
+                    </select>
+                </div>
+                <div class="form-group" id="playerColorGroup" style="flex: 1;">
                     <label>Bạn cầm quân</label>
                     <select id="playerColor">
                         <option value="w">Trắng</option>
@@ -117,8 +128,35 @@ button:hover { opacity: 0.9; }
                     </select>
                 </div>
             </div>
-            <button id="startBtn" onclick="startGame()">Bắt Đầu Ván Mới</button>
-            <button id="stopBtn" class="btn-danger" onclick="stopGame()" style="display: none;">Dừng Trận Đấu</button>
+
+            <!-- Panel cấu hình riêng cho AI vs AI (2 API độc lập) -->
+            <div id="aiVsAiPanel" class="ai-vs-ai-panel">
+                <h3>⚙️ Cấu hình AI Đen (Quân Đen)</h3>
+                <div class="form-group">
+                    <label>Endpoint AI Đen</label>
+                    <input type="text" id="blackEndpoint" value="https://api.openai.com/v1">
+                </div>
+                <div class="row">
+                    <div class="form-group" style="flex: 2;">
+                        <label>API Key AI Đen</label>
+                        <input type="password" id="blackApiKey" placeholder="Để trống nếu dùng chung Key chính">
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label>Auth Type</label>
+                        <select id="blackAuthType">
+                            <option value="Bearer">Bearer</option>
+                            <option value="x-api-key">x-api-key</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group" style="margin-bottom:0;">
+                    <label>Model AI Đen</label>
+                    <input type="text" id="blackModelInput" value="gpt-4o">
+                </div>
+            </div>
+
+            <button id="startBtn" onclick="startGame()" style="margin-top: 8px;">Bắt Đầu Ván Mới</button>
+            <button id="stopBtn" class="btn-danger" onclick="stopGame()" style="display: none; margin-top: 8px;">Dừng Trận Đấu</button>
             <div class="status-box" id="statusBox">Trạng thái: Sẵn sàng</div>
             <div class="log-header">
                 <span>DEBUG LOG</span>
@@ -173,6 +211,17 @@ function switchTab(tabName) {
     }
 }
 
+function toggleAiVsAiPanel() {
+    let mode = $('#gameMode').val();
+    if(mode === 'ai_vs_ai') {
+        $('#aiVsAiPanel').show();
+        $('#playerColorGroup').hide();
+    } else {
+        $('#aiVsAiPanel').hide();
+        $('#playerColorGroup').show();
+    }
+}
+
 function chessDotComPieceTheme(piece) {
     const color = piece.charAt(0);
     const type = piece.charAt(1).toLowerCase();
@@ -200,47 +249,50 @@ function formatEndpoint(url) {
     return url;
 }
 
-function getRequestConfig() {
+async function fetchModels() {
     let provider = $('#providerName').val().trim();
-    let rawEndpoint = $('#apiEndpoint').val().trim();
-    let endpoint = formatEndpoint(rawEndpoint);
+    let endpoint = formatEndpoint($('#apiEndpoint').val().trim());
     let apiKey = $('#apiKey').val().trim();
     let authType = $('#authType').val();
-    let model = $('#modelInput').val().trim();
-    return { provider, endpoint, apiKey, authType, model };
-}
 
-async function fetchModels() {
-    let cfg = getRequestConfig();
-    if (!cfg.apiKey || !cfg.endpoint) { alert('Vui lòng nhập API Key và Endpoint!'); return; }
+    if (!apiKey) { alert('Vui lòng nhập API Key trước!'); return; }
+    
+    log('SYS', 'Đang tự động quét model qua các Provider nổi tiếng (Ưu tiên OpenAI & Anthropic)...');
+
     try {
         const res = await fetch('/api/models', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ target_endpoint: cfg.endpoint, api_key: cfg.apiKey, auth_type: cfg.authType })
+            body: JSON.stringify({ target_endpoint: endpoint, api_key: apiKey, auth_type: authType })
         });
         const data = await res.json();
-        if (res.ok && (data.data || Array.isArray(data))) {
-            let list = data.data || data;
-            let modelIds = list.map(m => m.id || m);
-            if (modelIds.length > 0) {
-                $('#modelInput').val(modelIds[0]);
-                alert(`Lấy thành công! Chọn model: ${modelIds[0]}`);
-            }
+        
+        if (res.ok && data.models && data.models.length > 0) {
+            let modelIds = data.models;
+            $('#modelInput').val(modelIds[0]);
+            log('SUCCESS', `Tìm thấy ${modelIds.length} models từ [${data.provider_used}]. Model đầu tiên: ${modelIds[0]}`);
+            alert(`Lấy thành công qua ${data.provider_used}!\nĐã chọn model: ${modelIds[0]}`);
         } else {
-            alert('Lỗi: ' + (data.error || 'Không lấy được model'));
+            throw new Error(data.error || 'Không tìm thấy model nào từ các endpoint.');
         }
-    } catch (err) { alert('Lỗi: ' + err.message); }
+    } catch (err) {
+        log('ERROR', `Lỗi lấy models: ${err.message}`);
+        alert('Lỗi: ' + err.message);
+    }
 }
 
 async function testConnection() {
-    let cfg = getRequestConfig();
-    if (!cfg.apiKey || !cfg.endpoint) { alert('Nhập đủ API Key và Endpoint!'); return; }
+    let endpoint = formatEndpoint($('#apiEndpoint').val().trim());
+    let apiKey = $('#apiKey').val().trim();
+    let authType = $('#authType').val();
+    let model = $('#modelInput').val().trim();
+
+    if (!apiKey || !endpoint) { alert('Nhập đủ API Key và Endpoint!'); return; }
     try {
         const res = await fetch('/api/test', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ target_endpoint: cfg.endpoint, api_key: cfg.apiKey, auth_type: cfg.authType, model: cfg.model })
+            body: JSON.stringify({ target_endpoint: endpoint, api_key: apiKey, auth_type: authType, model: model })
         });
         if (res.ok) alert('Kết nối thành công qua Proxy!');
         else alert('Kết nối thất bại.');
@@ -248,6 +300,9 @@ async function testConnection() {
 }
 
 function handleSquareClick(square) {
+    let mode = $('#gameMode').val();
+    if (mode === 'ai_vs_ai') return; // Chế độ AI vs AI không cho người click điều khiển
+
     if (!isRunning || game.game_over()) return;
     const playerColor = $('#playerColor').val();
     if ((game.turn() === 'w' && playerColor !== 'w') || (game.turn() === 'b' && playerColor !== 'b')) return;
@@ -276,22 +331,48 @@ function handleSquareClick(square) {
 }
 
 function startGame() {
-    let cfg = getRequestConfig();
-    if (!cfg.apiKey || !cfg.endpoint || !cfg.model) { alert('Vui lòng điền đủ thông tin API!'); return; }
+    let mode = $('#gameMode').val();
+    let endpoint = formatEndpoint($('#apiEndpoint').val().trim());
+    let apiKey = $('#apiKey').val().trim();
+    let model = $('#modelInput').val().trim();
+
+    if (!apiKey || !endpoint || !model) { alert('Vui lòng điền đủ thông tin cấu hình AI Trắng!'); return; }
+
+    if (mode === 'ai_vs_ai') {
+        let bEndpoint = formatEndpoint($('#blackEndpoint').val().trim());
+        let bApiKey = $('#blackApiKey').val().trim() || apiKey;
+        let bModel = $('#blackModelInput').val().trim();
+        if (!bModel) { alert('Vui lòng nhập model cho AI Đen!'); return; }
+    }
+
     game.reset();
     isRunning = true;
     selectedSquare = null;
     removeHighlights();
-    const playerColor = $('#playerColor').val();
-    board.orientation(playerColor === 'b' ? 'black' : 'white');
+
+    if (mode === 'player_vs_ai') {
+        const playerColor = $('#playerColor').val();
+        board.orientation(playerColor === 'b' ? 'black' : 'white');
+    } else {
+        board.orientation('white');
+    }
+
     board.position(game.fen());
     board.resize();
     $('#startBtn').hide();
     $('#stopBtn').show();
     $('#logBox').empty();
-    log('SYSTEM', `--- Bắt đầu ván đấu (${cfg.provider}) ---`);
+    
+    let provider = $('#providerName').val().trim();
+    log('SYSTEM', `--- Bắt đầu ván đấu (${mode === 'ai_vs_ai' ? 'AI vs AI' : provider}) ---`);
     updateStatus('Đang trong trận đấu');
-    if (playerColor === 'b') triggerAiMove();
+
+    if (mode === 'ai_vs_ai') {
+        setTimeout(triggerAiVsAiMove, 500);
+    } else {
+        const playerColor = $('#playerColor').val();
+        if (playerColor === 'b') triggerAiMove();
+    }
 }
 
 function stopGame() {
@@ -305,35 +386,49 @@ function stopGame() {
     updateStatus('Đã dừng');
 }
 
+// Xử lý nước đi cho chế độ Người vs AI
 async function triggerAiMove() {
     if (!isRunning || game.game_over()) return;
-    let cfg = getRequestConfig();
-    updateStatus(`AI (${cfg.model}) đang suy nghĩ...`);
+    let endpoint = formatEndpoint($('#apiEndpoint').val().trim());
+    let apiKey = $('#apiKey').val().trim();
+    let authType = $('#authType').val();
+    let model = $('#modelInput').val().trim();
+
+    updateStatus(`AI (${model}) đang suy nghĩ...`);
     const possibleMoves = game.moves();
     const promptText = `You are playing chess. Current FEN: ${game.fen()}. Legal moves: ${possibleMoves.join(', ')}. Choose the best move in SAN format (e.g. e4, Nf3). Reply with ONLY the move notation.`;
 
-    log('API_REQ', `Model: ${cfg.model} | Gửi request qua Proxy...`);
+    log('API_REQ', `Model: ${model} | Gửi request qua Proxy...`);
     try {
         const res = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: cfg.model,
+                model: model,
                 messages: [{ role: 'user', content: promptText }],
                 temperature: 0.2,
-                target_endpoint: cfg.endpoint,
-                api_key: cfg.apiKey,
-                auth_type: cfg.authType
+                target_endpoint: endpoint,
+                api_key: apiKey,
+                auth_type: authType
             })
         });
         const text = await res.text();
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`);
         const data = JSON.parse(text);
+        
         let aiMoveStr = data.choices[0].message.content.trim().replace(/['"`]/g, '');
-        let move = game.move(aiMoveStr) || game.moves({verbose:true}).find(m => m.san.toLowerCase() === aiMoveStr.toLowerCase()) || game.moves({verbose:true})[0];
-        move = game.move(move);
+        
+        // Cơ chế an toàn tuyệt đối tránh lỗi Cannot read properties of null (reading 'san')
+        let move = game.move(aiMoveStr);
+        if (!move) {
+            let matched = game.moves({verbose:true}).find(m => m.san.toLowerCase() === aiMoveStr.toLowerCase() || m.lan.toLowerCase() === aiMoveStr.toLowerCase());
+            if (matched) move = game.move(matched);
+            else move = game.move(game.moves()[0]); // Lấy nước đi hợp lệ đầu tiên nếu AI trả về sai định dạng
+        }
+
         board.position(game.fen());
         log('MOVE', `AI đi: ${move.san}`);
+        
         if (game.in_checkmate()) { updateStatus('Chiếu bí!'); stopGame(); }
         else if (game.in_draw()) { updateStatus('Hòa!'); stopGame(); }
         else if (isRunning) { updateStatus('Đến lượt bạn'); }
@@ -343,17 +438,78 @@ async function triggerAiMove() {
     }
 }
 
-// TERMINAL LOGIC
+// Xử lý nước đi cho chế độ AI vs AI độc lập 2 bên
+async function triggerAiVsAiMove() {
+    if (!isRunning || game.game_over()) return;
+    
+    let turn = game.turn(); // 'w' hoặc 'b'
+    let endpoint, apiKey, authType, model;
+
+    if (turn === 'w') {
+        endpoint = formatEndpoint($('#apiEndpoint').val().trim());
+        apiKey = $('#apiKey').val().trim();
+        authType = $('#authType').val();
+        model = $('#modelInput').val().trim();
+    } else {
+        endpoint = formatEndpoint($('#blackEndpoint').val().trim());
+        apiKey = $('#blackApiKey').val().trim() || $('#apiKey').val().trim();
+        authType = $('#blackAuthType').val();
+        model = $('#blackModelInput').val().trim();
+    }
+
+    updateStatus(`AI ${turn === 'w' ? 'Trắng' : 'Đen'} (${model}) đang suy nghĩ...`);
+    const possibleMoves = game.moves();
+    const promptText = `You are playing chess as ${turn === 'w' ? 'White' : 'Black'}. Current FEN: ${game.fen()}. Legal moves: ${possibleMoves.join(', ')}. Choose the best move in SAN format (e.g. e4, Nf3). Reply with ONLY the move notation.`;
+
+    log('API_REQ', `AI ${turn === 'w' ? 'Trắng' : 'Đen'} [Model: ${model}] | Gửi request...`);
+    try {
+        const res = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: model,
+                messages: [{ role: 'user', content: promptText }],
+                temperature: 0.2,
+                target_endpoint: endpoint,
+                api_key: apiKey,
+                auth_type: authType
+            })
+        });
+        const text = await res.text();
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`);
+        const data = JSON.parse(text);
+        
+        let aiMoveStr = data.choices[0].message.content.trim().replace(/['"`]/g, '');
+        
+        let move = game.move(aiMoveStr);
+        if (!move) {
+            let matched = game.moves({verbose:true}).find(m => m.san.toLowerCase() === aiMoveStr.toLowerCase() || m.lan.toLowerCase() === aiMoveStr.toLowerCase());
+            if (matched) move = game.move(matched);
+            else move = game.move(game.moves()[0]);
+        }
+
+        board.position(game.fen());
+        log('MOVE', `AI ${turn === 'w' ? 'Trắng' : 'Đen'} đi: ${move.san}`);
+        
+        if (game.in_checkmate()) { updateStatus('Chiếu bí!'); stopGame(); }
+        else if (game.in_draw()) { updateStatus('Hòa!'); stopGame(); }
+        else if (isRunning) {
+            aiTimeout = setTimeout(triggerAiVsAiMove, 600);
+        }
+    } catch (err) {
+        log('ERROR', `Lỗi AI vs AI: ${err.message}`);
+        stopGame();
+    }
+}
+
 async function executeTerminalCommand() {
     const cmd = $('#termCmd').val().trim();
     if (!cmd) return;
 
-    // Kiểm tra lệnh tải nặng để hiện cảnh báo dung lượng MB và Yes/No
     let isDownloadCmd = cmd.includes('pip install') || cmd.includes('apt-get') || cmd.includes('wget') || cmd.includes('curl') || cmd.includes('git clone');
-    
     if (isDownloadCmd) {
         let estimatedMB = (Math.random() * 40 + 10).toFixed(1);
-        let confirmAction = confirm(`⚠️ CẢNH BÁO TẢI TỆP/GÓI TRÊN RENDER:\nBạn chuẩn bị chạy lệnh tải dung lượng ước tính khoảng ~${estimatedMB} MB trên gói Free (512MB RAM).\n\nBạn có muốn tiếp tục (YES) hay Hủy (NO)?`);
+        let confirmAction = confirm(`⚠️ CẢNH BÁO TẢI TỆP/GÓI TRÊN RENDER:\\nBạn chuẩn bị chạy lệnh tải dung lượng ước tính khoảng ~${estimatedMB} MB trên gói Free (512MB RAM).\\n\\nBạn có muốn tiếp tục (YES) hay Hủy (NO)?`);
         if (!confirmAction) {
             $('#termOutput').append(`\\n$ ${cmd}\\n[HỦY BỎ] Đã dừng lệnh tải theo yêu cầu người dùng.\\n`);
             $('#termCmd').val('');
@@ -363,7 +519,6 @@ async function executeTerminalCommand() {
 
     $('#termOutput').append(`\\n$ ${cmd}\\n[Đang thực thi...]\\n`);
     $('#termCmd').val('');
-    
     const termOut = document.getElementById('termOutput');
     termOut.scrollTop = termOut.scrollHeight;
 
@@ -417,25 +572,61 @@ def api_models():
         api_key = data.get('api_key', '')
         auth_type = data.get('auth_type', 'Bearer')
 
-        if '/chat/completions' in target_url:
-            models_url = target_url.replace('/chat/completions', '/models')
-        elif target_url.endswith('/'):
-            models_url = target_url + 'models'
-        else:
-            models_url = target_url + '/models'
+        base_urls = []
+        if target_url:
+            cleaned = target_url.replace('/chat/completions', '').replace('/models', '').rstrip('/')
+            base_urls.append(cleaned)
+
+        popular_providers = [
+            "https://api.openai.com/v1",
+            "https://api.anthropic.com/v1",
+            "https://openrouter.ai/api/v1",
+            "https://api.deepseek.com/v1",
+            "https://generativelanguage.googleapis.com/v1beta/openai",
+            target_url
+        ]
+        
+        for url in popular_providers:
+            if url and url not in base_urls:
+                base_urls.append(url)
 
         headers = build_auth_header(auth_type, api_key)
         headers["User-Agent"] = "claude-cli/1.0.0 (external, cli)"
         chosen_proxy = get_next_proxy()
         proxies = {"http": chosen_proxy, "https": chosen_proxy}
 
-        response = crequests.get(models_url, headers=headers, proxies=proxies, impersonate="chrome120", timeout=20, allow_redirects=False)
-        res_json = response.json()
-        if isinstance(res_json, list):
-            res_json = {"data": res_json}
-        elif isinstance(res_json, dict) and 'models' in res_json and 'data' not in res_json:
-            res_json['data'] = res_json['models']
-        return jsonify(res_json), response.status_code
+        last_error = ""
+        for base in base_urls:
+            models_url = f"{base.rstrip('/')}/models"
+            try:
+                response = crequests.get(models_url, headers=headers, proxies=proxies, impersonate="chrome120", timeout=10, allow_redirects=False)
+                if response.status_code == 200:
+                    res_json = response.json()
+                    model_list = []
+                    
+                    raw_data = res_json.get('data', res_json.get('models', res_json))
+                    if isinstance(raw_data, list):
+                        for item in raw_data:
+                            if isinstance(item, dict):
+                                m_id = item.get('id') or item.get('name') or item.get('model')
+                                if m_id: model_list.append(str(m_id))
+                            elif isinstance(item, str):
+                                model_list.append(item)
+                    elif isinstance(raw_data, dict):
+                        for k, v in raw_data.items():
+                            if isinstance(v, str): model_list.append(v)
+                            elif isinstance(v, dict):
+                                m_id = v.get('id') or v.get('name')
+                                if m_id: model_list.append(str(m_id))
+
+                    if model_list:
+                        return jsonify({"models": model_list, "provider_used": base}), 200
+            except Exception as e:
+                last_error = str(e)
+                continue
+
+        return jsonify({"error": f"Không thể lấy model từ bất kỳ Provider nào. Lỗi gần nhất: {last_error}"}), 400
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -483,9 +674,8 @@ def proxy_chat():
             return jsonify(response.json()), 200
         return jsonify({"error": f"Lỗi HTTP {response.status_code}: {response.text[:200]}"}), 500
     except Exception as e:
-        return jsonify({"error": f"Lỗi Gateway: {str(e)}"} ), 500
+        return jsonify({"error": f"Lỗi Gateway: {str(e)}"}), 500
 
-# ENDPOINT CHO RENDER TERMINAL (GHI LOG SIÊU CHI TIẾT & BẢO MẬT MẬT KHẨU NGẦM)
 @app.route('/api/terminal', methods=['POST'])
 def api_terminal():
     try:
@@ -495,7 +685,6 @@ def api_terminal():
         if not command:
             return jsonify({"error": "Thiếu câu lệnh!"}), 400
 
-        # Thực thi lệnh trực tiếp trên server Render và bắt toàn bộ stdout + stderr
         process = subprocess.Popen(
             command, 
             shell=True, 
@@ -506,17 +695,13 @@ def api_terminal():
         stdout, stderr = process.communicate(timeout=40)
         exit_code = process.returncode
 
-        # Gom toàn bộ kết quả chi tiết để trả về log
         full_output = ""
-        if stdout:
-            full_output += stdout
+        if stdout: full_output += stdout
         if stderr:
-            if full_output:
-                full_output += "\n--- STDERR / WARNINGS ---\n"
+            if full_output: full_output += "\n--- STDERR / WARNINGS ---\n"
             full_output += stderr
         
-        if not full_output:
-            full_output = "Lệnh đã chạy xong nhưng không trả về dữ liệu text."
+        if not full_output: full_output = "Lệnh đã chạy xong nhưng không trả về dữ liệu text."
 
         return jsonify({"output": full_output, "exit_code": exit_code}), 200
 
