@@ -1,5 +1,9 @@
 import json
 import random
+import subprocess
+import os
+import threading
+import queue
 from flask import Flask, request, jsonify, render_template_string
 from curl_cffi import requests as crequests
 
@@ -25,7 +29,7 @@ HTML_TEMPLATE = """
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Cờ Vua AI - Gateway</title>
+<title>Cờ Vua AI & Render Terminal</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
@@ -49,63 +53,99 @@ button:hover { opacity: 0.9; }
 .log-box { height: 140px; overflow-y: auto; background: #020617; border-radius: 6px; border: 1px solid #334155; padding: 6px; font-family: 'Courier New', Courier, monospace; font-size: 0.7rem; color: #38bdf8; white-space: pre-wrap; word-break: break-all; }
 .highlight-square { background-color: rgba(255, 255, 0, 0.4) !important; }
 .highlight-hint { background: radial-gradient(circle, rgba(16, 185, 129, 0.7) 28%, transparent 28%) !important; }
+
+/* Tabs style */
+.tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+.tab-btn { flex: 1; padding: 8px; background: #334155; border: none; border-radius: 6px; color: #cbd5e1; cursor: pointer; font-size: 0.8rem; font-weight: bold; }
+.tab-btn.active { background: #0284c7; color: #fff; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Terminal style */
+.terminal-box { height: 260px; overflow-y: auto; background: #000; border-radius: 6px; border: 1px solid #334155; padding: 8px; font-family: 'Courier New', Courier, monospace; font-size: 0.75rem; color: #22c55e; white-space: pre-wrap; word-break: break-all; margin-bottom: 6px; }
+.terminal-input-row { display: flex; gap: 6px; }
+.terminal-input-row input { flex: 1; background: #020617; }
 </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>Cờ Vua AI - Gateway</h1>
-    <div class="card"><div id="board"></div></div>
-    <div class="card">
-        <div class="form-group">
-            <label>Tên Provider (Nhà cung cấp)</label>
-            <input type="text" id="providerName" placeholder="vd: TabiToken, OpenRouter..." value="TabiToken">
-        </div>
-        <div class="form-group">
-            <label>API Endpoint (URL Chat Completions riêng biệt)</label>
-            <input type="text" id="apiEndpoint" placeholder="https://api.provider.com/v1/chat/completions" value="https://tabitoken.com/v1/chat/completions">
-        </div>
-        <div class="row">
-            <div class="form-group" style="flex: 2;">
-                <label>API Key</label>
-                <input type="password" id="apiKey" placeholder="Dán API Key...">
+    <h1>Cờ Vua AI & Render Terminal</h1>
+    
+    <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('game')">🎮 Ván Cờ AI</button>
+        <button class="tab-btn" onclick="switchTab('terminal')">💻 Render Terminal</button>
+    </div>
+
+    <!-- TAB 1: CỜ VUA -->
+    <div id="tab-game" class="tab-content active">
+        <div class="card"><div id="board"></div></div>
+        <div class="card">
+            <div class="form-group">
+                <label>Tên Provider (Nhà cung cấp)</label>
+                <input type="text" id="providerName" value="TabiToken">
             </div>
-            <div class="form-group" style="flex: 1;">
-                <label>Auth Type</label>
-                <select id="authType">
-                    <option value="Bearer">Bearer</option>
-                    <option value="x-api-key">x-api-key</option>
-                </select>
+            <div class="form-group">
+                <label>API Endpoint</label>
+                <input type="text" id="apiEndpoint" value="https://tabitoken.com/v1">
+            </div>
+            <div class="row">
+                <div class="form-group" style="flex: 2;">
+                    <label>API Key</label>
+                    <input type="password" id="apiKey" placeholder="Dán API Key...">
+                </div>
+                <div class="form-group" style="flex: 1;">
+                    <label>Auth Type</label>
+                    <select id="authType">
+                        <option value="Bearer">Bearer</option>
+                        <option value="x-api-key">x-api-key</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Tên Model AI</label>
+                <input type="text" id="modelInput" value="gpt-4o">
+            </div>
+            <div class="row">
+                <button class="btn-success" onclick="fetchModels()" style="flex: 1;">Lấy Model</button>
+                <button onclick="testConnection()" style="flex: 1; background: #0d9488;">Test Connect</button>
+            </div>
+            <div class="row" style="margin-top: 6px;">
+                <div class="form-group" style="flex: 1;">
+                    <label>Bạn cầm quân</label>
+                    <select id="playerColor">
+                        <option value="w">Trắng</option>
+                        <option value="b">Đen</option>
+                    </select>
+                </div>
+            </div>
+            <button id="startBtn" onclick="startGame()">Bắt Đầu Ván Mới</button>
+            <button id="stopBtn" class="btn-danger" onclick="stopGame()" style="display: none;">Dừng Trận Đấu</button>
+            <div class="status-box" id="statusBox">Trạng thái: Sẵn sàng</div>
+            <div class="log-header">
+                <span>DEBUG LOG</span>
+                <div>
+                    <button class="btn-secondary" onclick="copyLog('logBox')">Copy</button>
+                    <button class="btn-secondary" onclick="$('#logBox').empty()">Xóa</button>
+                </div>
+            </div>
+            <div class="log-box" id="logBox"></div>
+        </div>
+    </div>
+
+    <!-- TAB 2: TERMINAL RENDER -->
+    <div id="tab-terminal" class="tab-content">
+        <div class="card">
+            <div class="form-group">
+                <label>Mật khẩu Terminal</label>
+                <input type="password" id="termPass" placeholder="Nhập mật khẩu (AnhKhoa123)...">
+            </div>
+            <div class="terminal-box" id="termOutput">Render Free Tier (0.1 CPU / 512MB RAM) Terminal Ready.\\nGõ lệnh bên dưới (ví dụ: pip install ... hoặc ls, df -h)...\\n</div>
+            <div class="terminal-input-row">
+                <input type="text" id="termCmd" placeholder="Nhập lệnh bash..." onkeydown="if(event.key==='Enter') executeTerminalCommand()">
+                <button onclick="executeTerminalCommand()" style="width: 80px; margin-top:0;">Gửi</button>
             </div>
         </div>
-        <div class="form-group">
-            <label>Tên Model AI (Tự gõ hoặc lấy danh sách)</label>
-            <input type="text" id="modelInput" placeholder="vd: claude-3-5-sonnet, gpt-4o..." value="claude-3-5-sonnet">
-        </div>
-        <div class="row">
-            <button class="btn-success" onclick="fetchModels()" style="flex: 1;">Lấy danh sách Model</button>
-            <button onclick="testConnection()" style="flex: 1; background: #0d9488;">Test Connect</button>
-        </div>
-        <div class="row" style="margin-top: 6px;">
-            <div class="form-group" style="flex: 1;">
-                <label>Bạn cầm quân</label>
-                <select id="playerColor">
-                    <option value="w">Trắng</option>
-                    <option value="b">Đen</option>
-                </select>
-            </div>
-        </div>
-        <button id="startBtn" onclick="startGame()">Bắt Đầu Ván Mới</button>
-        <button id="stopBtn" class="btn-danger" onclick="stopGame()" style="display: none;">Dừng Trận Đấu</button>
-        <div class="status-box" id="statusBox">Trạng thái: Sẵn sàng</div>
-        <div class="log-header">
-            <span>DEBUG LOG</span>
-            <div>
-                <button class="btn-secondary" onclick="copyLog()">Copy</button>
-                <button class="btn-secondary" onclick="clearLog()">Xóa</button>
-            </div>
-        </div>
-        <div class="log-box" id="logBox"></div>
     </div>
 </div>
 
@@ -118,6 +158,19 @@ let game = new Chess();
 let isRunning = false;
 let aiTimeout = null;
 let selectedSquare = null;
+
+function switchTab(tabName) {
+    $('.tab-btn').removeClass('active');
+    $('.tab-content').removeClass('active');
+    if(tabName === 'game') {
+        $('.tab-btn:eq(0)').addClass('active');
+        $('#tab-game').addClass('active');
+        if(board) board.resize();
+    } else {
+        $('.tab-btn:eq(1)').addClass('active');
+        $('#tab-terminal').addClass('active');
+    }
+}
 
 function chessDotComPieceTheme(piece) {
     const color = piece.charAt(0);
@@ -132,14 +185,24 @@ function log(type, msg) {
     logBox.scrollTop(logBox[0].scrollHeight);
 }
 
-function clearLog() { $('#logBox').empty(); }
-function copyLog() { navigator.clipboard.writeText($('#logBox').text()).then(() => alert('Đã copy Log!')); }
+function copyLog(elementId) { navigator.clipboard.writeText($('#' + elementId).text()).then(() => alert('Đã copy nội dung!')); }
 function updateStatus(msg) { $('#statusBox').text('Trạng thái: ' + msg); }
 function removeHighlights() { $('#board .square-55d63').removeClass('highlight-square highlight-hint'); }
 
+function formatEndpoint(url) {
+    url = url.trim().replace(/\/+$/, '');
+    if (!url.endsWith('/chat/completions')) {
+        if (url.endsWith('/v1')) url += '/chat/completions';
+        else if (!url.includes('/v1')) url += '/v1/chat/completions';
+        else url += '/chat/completions';
+    }
+    return url;
+}
+
 function getRequestConfig() {
     let provider = $('#providerName').val().trim();
-    let endpoint = $('#apiEndpoint').val().trim();
+    let rawEndpoint = $('#apiEndpoint').val().trim();
+    let endpoint = formatEndpoint(rawEndpoint);
     let apiKey = $('#apiKey').val().trim();
     let authType = $('#authType').val();
     let model = $('#modelInput').val().trim();
@@ -149,66 +212,38 @@ function getRequestConfig() {
 async function fetchModels() {
     let cfg = getRequestConfig();
     if (!cfg.apiKey || !cfg.endpoint) { alert('Vui lòng nhập API Key và Endpoint!'); return; }
-    
-    log('SYS', `Đang quét danh sách model từ ${cfg.provider || 'Server'}...`);
-
     try {
         const res = await fetch('/api/models', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                target_endpoint: cfg.endpoint,
-                api_key: cfg.apiKey,
-                auth_type: cfg.authType
-            })
+            body: JSON.stringify({ target_endpoint: cfg.endpoint, api_key: cfg.apiKey, auth_type: cfg.authType })
         });
         const data = await res.json();
-        if (res.ok && data.data) {
-            let modelIds = data.data.map(m => m.id);
-            log('SUCCESS', `Tìm thấy ${modelIds.length} models: ${modelIds.slice(0, 5).join(', ')}...`);
+        if (res.ok && (data.data || Array.isArray(data))) {
+            let list = data.data || data;
+            let modelIds = list.map(m => m.id || m);
             if (modelIds.length > 0) {
                 $('#modelInput').val(modelIds[0]);
-                alert(`Đã lấy thành công! Model đầu tiên được tự điền: ${modelIds[0]}`);
+                alert(`Lấy thành công! Chọn model: ${modelIds[0]}`);
             }
         } else {
-            let errMsg = data.error;
-            if (typeof errMsg === 'object') errMsg = JSON.stringify(errMsg);
-            throw new Error(errMsg || 'Không thể đọc danh sách model');
+            alert('Lỗi: ' + (data.error || 'Không lấy được model'));
         }
-    } catch (err) {
-        log('ERROR', `Lỗi lấy models: ${err.message}`);
-        alert('Lỗi: ' + err.message);
-    }
+    } catch (err) { alert('Lỗi: ' + err.message); }
 }
 
 async function testConnection() {
     let cfg = getRequestConfig();
     if (!cfg.apiKey || !cfg.endpoint) { alert('Nhập đủ API Key và Endpoint!'); return; }
-    log('SYS', 'Đang test kết nối qua Proxy Gateway...');
-
     try {
         const res = await fetch('/api/test', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                target_endpoint: cfg.endpoint,
-                api_key: cfg.apiKey,
-                auth_type: cfg.authType,
-                model: cfg.model
-            })
+            body: JSON.stringify({ target_endpoint: cfg.endpoint, api_key: cfg.apiKey, auth_type: cfg.authType, model: cfg.model })
         });
-        const text = await res.text();
-        if (res.ok) {
-            log('SUCCESS', 'Kết nối thành công qua Proxy!');
-            alert('Kết nối thành công!');
-        } else {
-            log('ERROR', `Test thất bại: ${text}`);
-            alert('Kết nối thất bại: ' + text);
-        }
-    } catch (err) {
-        log('ERROR', `Lỗi kết nối: ${err.message}`);
-        alert('Lỗi: ' + err.message);
-    }
+        if (res.ok) alert('Kết nối thành công qua Proxy!');
+        else alert('Kết nối thất bại.');
+    } catch (err) { alert('Lỗi: ' + err.message); }
 }
 
 function handleSquareClick(square) {
@@ -241,26 +276,20 @@ function handleSquareClick(square) {
 
 function startGame() {
     let cfg = getRequestConfig();
-    if (!cfg.apiKey) { alert('Vui lòng nhập API Key!'); return; }
-    if (!cfg.endpoint) { alert('Vui lòng nhập Endpoint!'); return; }
-    if (!cfg.model) { alert('Vui lòng nhập tên Model!'); return; }
-
+    if (!cfg.apiKey || !cfg.endpoint || !cfg.model) { alert('Vui lòng điền đủ thông tin API!'); return; }
     game.reset();
     isRunning = true;
     selectedSquare = null;
     removeHighlights();
-
     const playerColor = $('#playerColor').val();
     board.orientation(playerColor === 'b' ? 'black' : 'white');
     board.position(game.fen());
     board.resize();
-
     $('#startBtn').hide();
     $('#stopBtn').show();
-    clearLog();
+    $('#logBox').empty();
     log('SYSTEM', `--- Bắt đầu ván đấu (${cfg.provider}) ---`);
     updateStatus('Đang trong trận đấu');
-
     if (playerColor === 'b') triggerAiMove();
 }
 
@@ -278,55 +307,87 @@ function stopGame() {
 async function triggerAiMove() {
     if (!isRunning || game.game_over()) return;
     let cfg = getRequestConfig();
-
     updateStatus(`AI (${cfg.model}) đang suy nghĩ...`);
     const possibleMoves = game.moves();
-    const promptText = `Trạng thái FEN: "${game.fen()}". Nước hợp lệ: [${possibleMoves.join(', ')}]. Chọn 1 nước đi tốt nhất dạng SAN (vd: e4, Nf3). Chỉ trả lời duy nhất mã nước đi.`;
+    const promptText = `You are playing chess. Current FEN: ${game.fen()}. Legal moves: ${possibleMoves.join(', ')}. Choose the best move in SAN format (e.g. e4, Nf3). Reply with ONLY the move notation.`;
 
-    log('API_REQ', `[${cfg.provider}] Model: ${cfg.model} | Gửi request qua Proxy...`);
-
+    log('API_REQ', `Model: ${cfg.model} | Gửi request qua Proxy...`);
     try {
-        const payload = {
-            model: cfg.model,
-            messages: [{ role: 'user', content: promptText }],
-            temperature: 0.2,
-            target_endpoint: cfg.endpoint,
-            api_key: cfg.apiKey,
-            auth_type: cfg.authType
-        };
-
         const res = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: JSON.stringify({
+                model: cfg.model,
+                messages: [{ role: 'user', content: promptText }],
+                temperature: 0.2,
+                target_endpoint: cfg.endpoint,
+                api_key: cfg.apiKey,
+                auth_type: cfg.authType
+            })
         });
-
         const text = await res.text();
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`);
-
         const data = JSON.parse(text);
         let aiMoveStr = data.choices[0].message.content.trim().replace(/['"`]/g, '');
-        
-        let move = game.move(aiMoveStr);
-        if (!move) {
-            const match = possibleMoves.find(m => m.toLowerCase() === aiMoveStr.toLowerCase());
-            if (match) move = game.move(match);
-        }
-        if (!move) {
-            move = game.move(possibleMoves[Math.floor(Math.random() * possibleMoves.length)]);
-        }
-
+        let move = game.move(aiMoveStr) || game.moves({verbose:true}).find(m => m.san.toLowerCase() === aiMoveStr.toLowerCase()) || game.moves({verbose:true})[0];
+        move = game.move(move);
         board.position(game.fen());
         log('MOVE', `AI đi: ${move.san}`);
-        
         if (game.in_checkmate()) { updateStatus('Chiếu bí!'); stopGame(); }
         else if (game.in_draw()) { updateStatus('Hòa!'); stopGame(); }
         else if (isRunning) { updateStatus('Đến lượt bạn'); }
-
     } catch (err) {
         log('ERROR', `Lỗi: ${err.message}`);
         stopGame();
     }
+}
+
+// TERMINAL LOGIC
+async function executeTerminalCommand() {
+    const password = $('#termPass').val();
+    const cmd = $('#termCmd').val().trim();
+    if (!cmd) return;
+
+    if (password !== 'AnhKhoa123') {
+        alert('Mật khẩu Terminal không đúng! Mật khẩu là: AnhKhoa123');
+        return;
+    }
+
+    // Kiểm tra xem lệnh có phải là tải tệp / cài đặt nặng không để hiện bảng Yes/No kèm định lượng MB giả lập hoặc thực tế
+    let isDownloadCmd = cmd.includes('pip install') || cmd.includes('apt-get') || cmd.includes('wget') || cmd.includes('curl') || cmd.includes('git clone');
+    
+    if (isDownloadCmd) {
+        let estimatedMB = (Math.random() * 45 + 5).toFixed(1); // Ước tính dung lượng tải
+        let confirmAction = confirm(`⚠️ CẢNH BÁO TẢI TỆP/GÓI TRÊN RENDER:\nBạn chuẩn bị chạy lệnh tải dung lượng ước tính khoảng ~${estimatedMB} MB trên gói Free (512MB RAM).\n\nBạn có chắc chắn muốn tiếp tục (YES) hay Hủy (NO)?`);
+        if (!confirmAction) {
+            $('#termOutput').append(`\\n$ ${cmd}\\n[HỦY BỎ] Người dùng đã từ chối thực hiện lệnh tải.\\n`);
+            $('#termCmd').val('');
+            return;
+        }
+    }
+
+    $('#termOutput').append(`\\n$ ${cmd}\\n đang chạy...\\n`);
+    $('#termCmd').val('');
+    
+    const termOut = document.getElementById('termOutput');
+    termOut.scrollTop = termOut.scrollHeight;
+
+    try {
+        const res = await fetch('/api/terminal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: password, command: cmd })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            $('#termOutput').append(data.output + '\\n');
+        } else {
+            $('#termOutput').append(`Lỗi: ${data.error}\\n`);
+        }
+    } catch (err) {
+        $('#termOutput').append(`Lỗi kết nối: ${err.message}\\n`);
+    }
+    termOut.scrollTop = termOut.scrollHeight;
 }
 
 $(document).ready(function() {
@@ -370,24 +431,16 @@ def api_models():
 
         headers = build_auth_header(auth_type, api_key)
         headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"
-
         chosen_proxy = get_next_proxy()
         proxies = {"http": chosen_proxy, "https": chosen_proxy}
 
         response = crequests.get(models_url, headers=headers, proxies=proxies, impersonate="chrome120", timeout=20, allow_redirects=False)
-        
-        try:
-            res_json = response.json()
-            # Chuẩn hóa cấu trúc trả về để luôn có key 'data'
-            if isinstance(res_json, list):
-                res_json = {"data": res_json}
-            elif isinstance(res_json, dict) and 'models' in res_json and 'data' not in res_json:
-                res_json['data'] = res_json['models']
-            return jsonify(res_json), response.status_code
-        except Exception:
-            snippet = response.text[:200].replace('\n', ' ')
-            return jsonify({"error": f"Server không trả về JSON hợp lệ (HTTP {response.status_code}): {snippet}"}), 500
-
+        res_json = response.json()
+        if isinstance(res_json, list):
+            res_json = {"data": res_json}
+        elif isinstance(res_json, dict) and 'models' in res_json and 'data' not in res_json:
+            res_json['data'] = res_json['models']
+        return jsonify(res_json), response.status_code
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -402,13 +455,7 @@ def api_test():
 
         headers = build_auth_header(auth_type, api_key)
         headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"
-
-        payload = {
-            "model": model,
-            "messages": [{"role": "user", "content": "hi"}],
-            "max_tokens": 5
-        }
-
+        payload = {"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 5}
         chosen_proxy = get_next_proxy()
         proxies = {"http": chosen_proxy, "https": chosen_proxy}
 
@@ -426,39 +473,50 @@ def proxy_chat():
         target_url = payload.pop('target_endpoint', '').strip()
         api_key = payload.pop('api_key', '').strip()
         auth_type = payload.pop('auth_type', 'Bearer')
-        payload.pop('provider', None) # Bỏ field phụ nếu có
+        payload.pop('provider', None)
 
         if not target_url:
             return jsonify({"error": "Thiếu API Endpoint"}), 400
 
         headers = build_auth_header(auth_type, api_key)
         headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"
-
         chosen_proxy = get_next_proxy()
         proxies = {"http": chosen_proxy, "https": chosen_proxy}
 
-        response = crequests.post(
-            target_url,
-            headers=headers,
-            json=payload,
-            proxies=proxies,
-            impersonate="chrome120",
-            timeout=25,
-            allow_redirects=False
-        )
-
+        response = crequests.post(target_url, headers=headers, json=payload, proxies=proxies, impersonate="chrome120", timeout=25, allow_redirects=False)
         if response.status_code == 200:
-            try:
-                res_json = response.json()
-                return jsonify(res_json), 200
-            except Exception:
-                snippet = response.text[:300].replace('\n', ' ')
-                return jsonify({"error": f"API trả về Non-JSON: {snippet}"}), 500
-
+            return jsonify(response.json()), 200
         return jsonify({"error": f"Lỗi HTTP {response.status_code}: {response.text[:200]}"}), 500
-
     except Exception as e:
         return jsonify({"error": f"Lỗi Gateway: {str(e)}"}), 500
+
+# ENDPOINT CHO RENDER TERMINAL
+@app.route('/api/terminal', methods=['POST'])
+def api_terminal():
+    try:
+        data = request.get_json()
+        password = data.get('password', '')
+        command = data.get('command', '')
+
+        if password != 'AnhKhoa123':
+            return jsonify({"error": "Sai mật khẩu Terminal!"}), 403
+
+        if not command:
+            return jsonify({"error": "Thiếu câu lệnh!"}), 400
+
+        # Thực thi lệnh trực tiếp trên server Render
+        process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        stdout, stderr = process.communicate(timeout=30)
+        
+        output = stdout if stdout else stderr
+        if not output:
+            output = "Lệnh đã thực thi thành công (Không có phản hồi text)."
+
+        return jsonify({"output": output}), 200
+    except subprocess.TimeoutExpired:
+        return jsonify({"output": "Lỗi: Lệnh chạy quá thời gian (Timeout > 30s)."}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
