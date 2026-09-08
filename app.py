@@ -58,7 +58,11 @@ button:hover { opacity: 0.9; }
     <div class="card"><div id="board"></div></div>
     <div class="card">
         <div class="form-group">
-            <label>API Endpoint (Dán đầy đủ URL chat completions)</label>
+            <label>Tên Provider (Nhà cung cấp)</label>
+            <input type="text" id="providerName" placeholder="vd: TabiToken, OpenRouter..." value="TabiToken">
+        </div>
+        <div class="form-group">
+            <label>API Endpoint (URL Chat Completions riêng biệt)</label>
             <input type="text" id="apiEndpoint" placeholder="https://api.provider.com/v1/chat/completions" value="https://tabitoken.com/v1/chat/completions">
         </div>
         <div class="row">
@@ -75,8 +79,8 @@ button:hover { opacity: 0.9; }
             </div>
         </div>
         <div class="form-group">
-            <label>Tên Model AI (Ví dụ: gpt-4o, claude-3-5-sonnet, ...)</label>
-            <input type="text" id="modelInput" placeholder="vd: gpt-4o, claude-3-5-sonnet" value="gpt-4o">
+            <label>Tên Model AI (Tự gõ hoặc lấy danh sách)</label>
+            <input type="text" id="modelInput" placeholder="vd: claude-3-5-sonnet, gpt-4o..." value="claude-3-5-sonnet">
         </div>
         <div class="row">
             <button class="btn-success" onclick="fetchModels()" style="flex: 1;">Lấy danh sách Model</button>
@@ -134,18 +138,19 @@ function updateStatus(msg) { $('#statusBox').text('Trạng thái: ' + msg); }
 function removeHighlights() { $('#board .square-55d63').removeClass('highlight-square highlight-hint'); }
 
 function getRequestConfig() {
+    let provider = $('#providerName').val().trim();
     let endpoint = $('#apiEndpoint').val().trim();
     let apiKey = $('#apiKey').val().trim();
     let authType = $('#authType').val();
     let model = $('#modelInput').val().trim();
-    return { endpoint, apiKey, authType, model };
+    return { provider, endpoint, apiKey, authType, model };
 }
 
 async function fetchModels() {
     let cfg = getRequestConfig();
     if (!cfg.apiKey || !cfg.endpoint) { alert('Vui lòng nhập API Key và Endpoint!'); return; }
     
-    log('SYS', 'Đang quét danh sách model từ server...');
+    log('SYS', `Đang quét danh sách model từ ${cfg.provider || 'Server'}...`);
 
     try {
         const res = await fetch('/api/models', {
@@ -166,7 +171,9 @@ async function fetchModels() {
                 alert(`Đã lấy thành công! Model đầu tiên được tự điền: ${modelIds[0]}`);
             }
         } else {
-            throw new Error(data.error || 'Không thể đọc danh sách model');
+            let errMsg = data.error;
+            if (typeof errMsg === 'object') errMsg = JSON.stringify(errMsg);
+            throw new Error(errMsg || 'Không thể đọc danh sách model');
         }
     } catch (err) {
         log('ERROR', `Lỗi lấy models: ${err.message}`);
@@ -251,7 +258,7 @@ function startGame() {
     $('#startBtn').hide();
     $('#stopBtn').show();
     clearLog();
-    log('SYSTEM', '--- Bắt đầu ván đấu ---');
+    log('SYSTEM', `--- Bắt đầu ván đấu (${cfg.provider}) ---`);
     updateStatus('Đang trong trận đấu');
 
     if (playerColor === 'b') triggerAiMove();
@@ -276,7 +283,7 @@ async function triggerAiMove() {
     const possibleMoves = game.moves();
     const promptText = `Trạng thái FEN: "${game.fen()}". Nước hợp lệ: [${possibleMoves.join(', ')}]. Chọn 1 nước đi tốt nhất dạng SAN (vd: e4, Nf3). Chỉ trả lời duy nhất mã nước đi.`;
 
-    log('API_REQ', `Model: ${cfg.model} | Gửi request qua Proxy...`);
+    log('API_REQ', `[${cfg.provider}] Model: ${cfg.model} | Gửi request qua Proxy...`);
 
     try {
         const payload = {
@@ -350,7 +357,7 @@ def build_auth_header(auth_type, api_key):
 def api_models():
     try:
         data = request.get_json()
-        target_url = data.get('target_endpoint', '')
+        target_url = data.get('target_endpoint', '').strip()
         api_key = data.get('api_key', '')
         auth_type = data.get('auth_type', 'Bearer')
 
@@ -367,10 +374,15 @@ def api_models():
         chosen_proxy = get_next_proxy()
         proxies = {"http": chosen_proxy, "https": chosen_proxy}
 
-        response = crequests.get(models_url, headers=headers, proxies=proxies, impersonate="chrome120", timeout=20)
+        response = crequests.get(models_url, headers=headers, proxies=proxies, impersonate="chrome120", timeout=20, allow_redirects=False)
         
         try:
             res_json = response.json()
+            # Chuẩn hóa cấu trúc trả về để luôn có key 'data'
+            if isinstance(res_json, list):
+                res_json = {"data": res_json}
+            elif isinstance(res_json, dict) and 'models' in res_json and 'data' not in res_json:
+                res_json['data'] = res_json['models']
             return jsonify(res_json), response.status_code
         except Exception:
             snippet = response.text[:200].replace('\n', ' ')
@@ -383,7 +395,7 @@ def api_models():
 def api_test():
     try:
         data = request.get_json()
-        target_url = data.get('target_endpoint')
+        target_url = data.get('target_endpoint', '').strip()
         api_key = data.get('api_key')
         auth_type = data.get('auth_type', 'Bearer')
         model = data.get('model', 'gpt-4o')
@@ -400,7 +412,7 @@ def api_test():
         chosen_proxy = get_next_proxy()
         proxies = {"http": chosen_proxy, "https": chosen_proxy}
 
-        response = crequests.post(target_url, headers=headers, json=payload, proxies=proxies, impersonate="chrome120", timeout=20)
+        response = crequests.post(target_url, headers=headers, json=payload, proxies=proxies, impersonate="chrome120", timeout=20, allow_redirects=False)
         if response.status_code in [200, 400, 404, 422]:
             return jsonify({"status": "ok", "code": response.status_code}), 200
         return response.text, response.status_code
@@ -414,6 +426,7 @@ def proxy_chat():
         target_url = payload.pop('target_endpoint', '').strip()
         api_key = payload.pop('api_key', '').strip()
         auth_type = payload.pop('auth_type', 'Bearer')
+        payload.pop('provider', None) # Bỏ field phụ nếu có
 
         if not target_url:
             return jsonify({"error": "Thiếu API Endpoint"}), 400
@@ -430,7 +443,8 @@ def proxy_chat():
             json=payload,
             proxies=proxies,
             impersonate="chrome120",
-            timeout=25
+            timeout=25,
+            allow_redirects=False
         )
 
         if response.status_code == 200:
