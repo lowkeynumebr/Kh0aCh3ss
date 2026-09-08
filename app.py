@@ -84,8 +84,8 @@ button:hover { opacity: 0.9; }
         <div class="card"><div id="board"></div></div>
         <div class="card">
             <div class="form-group">
-                <label>Tên Provider (Nhà cung cấp)</label>
-                <input type="text" id="providerName" value="OpenAI / Claude Hub">
+                <label>Tên Provider (Nhà cung cấp - Khuyên dùng không dấu)</label>
+                <input type="text" id="providerName" value="OpenAI">
             </div>
             <div class="form-group">
                 <label>API Endpoint</label>
@@ -104,14 +104,26 @@ button:hover { opacity: 0.9; }
                     </select>
                 </div>
             </div>
-            <div class="form-group">
-                <label>Tên Model AI</label>
-                <input type="text" id="modelInput" value="gpt-4o">
+
+            <!-- PHẦN QUÉT VÀ CHỌN MODEL TỪ DANH SÁCH LƯU TRỮ -->
+            <div class="form-group" style="background: #0f172a; padding: 8px; border-radius: 6px; border: 1px solid #334155; margin-top: 6px;">
+                <label style="color: #38bdf8; font-weight: bold; margin-bottom: 4px;">🎯 Kho Model Đã Quét (Lưu vĩnh viễn)</label>
+                <div class="row" style="margin-bottom: 6px;">
+                    <input type="text" id="modelSearch" placeholder="🔍 Tìm kiếm model trong kho..." oninput="filterModelList()" style="flex: 2;">
+                    <button class="btn-success" onclick="fetchModels()" style="flex: 1; margin-top:0;">Quét & Cộng Dồn</button>
+                </div>
+                <div class="row">
+                    <select id="savedModelSelect" onchange="onSelectedModelChange()" style="flex: 3;">
+                        <option value="">-- Chưa có model nào, hãy bấm Quét --</option>
+                    </select>
+                    <button class="btn-danger" onclick="clearSavedModels()" style="flex: 1; margin-top:0; font-size: 0.7rem;">Xóa Kho</button>
+                </div>
             </div>
-            <div class="row">
-                <button class="btn-success" onclick="fetchModels()" style="flex: 1;">Lấy Model (Auto)</button>
-                <button onclick="testConnection()" style="flex: 1; background: #0d9488;">Test Connect</button>
+
+            <div class="row" style="margin-top: 6px;">
+                <button onclick="testConnection()" style="background: #0d9488;">Test Connect Model Đang Chọn</button>
             </div>
+
             <div class="row" style="margin-top: 6px;">
                 <div class="form-group" style="flex: 1;">
                     <label>Chế độ ván đấu</label>
@@ -133,25 +145,24 @@ button:hover { opacity: 0.9; }
             <div id="aiVsAiPanel" class="ai-vs-ai-panel">
                 <h3>⚙️ Cấu hình AI Đen (Quân Đen)</h3>
                 <div class="form-group">
+                    <label>Chọn Model Đen từ Kho</label>
+                    <select id="blackModelSelect" onchange="onBlackModelChange()">
+                        <option value="">-- Chọn Model Đen --</option>
+                    </select>
+                </div>
+                <div class="form-group">
                     <label>Endpoint AI Đen</label>
-                    <input type="text" id="blackEndpoint" value="https://api.openai.com/v1">
+                    <input type="text" id="blackEndpoint" readonly>
                 </div>
                 <div class="row">
                     <div class="form-group" style="flex: 2;">
                         <label>API Key AI Đen</label>
-                        <input type="password" id="blackApiKey" placeholder="Để trống nếu dùng chung Key chính">
+                        <input type="password" id="blackApiKey" readonly>
                     </div>
                     <div class="form-group" style="flex: 1;">
                         <label>Auth Type</label>
-                        <select id="blackAuthType">
-                            <option value="Bearer">Bearer</option>
-                            <option value="x-api-key">x-api-key</option>
-                        </select>
+                        <input type="text" id="blackAuthType" readonly style="color: #94a3b8;">
                     </div>
-                </div>
-                <div class="form-group" style="margin-bottom:0;">
-                    <label>Model AI Đen</label>
-                    <input type="text" id="blackModelInput" value="gpt-4o">
                 </div>
             </div>
 
@@ -198,6 +209,8 @@ let isRunning = false;
 let aiTimeout = null;
 let selectedSquare = null;
 
+let modelRegistry = JSON.parse(localStorage.getItem('ai_chess_model_registry') || '{}');
+
 function switchTab(tabName) {
     $('.tab-btn').removeClass('active');
     $('.tab-content').removeClass('active');
@@ -239,69 +252,138 @@ function copyLog(elementId) { navigator.clipboard.writeText($('#' + elementId).t
 function updateStatus(msg) { $('#statusBox').text('Trạng thái: ' + msg); }
 function removeHighlights() { $('#board .square-55d63').removeClass('highlight-square highlight-hint'); }
 
-function formatEndpoint(url) {
-    url = url.trim().replace(/\/+$/, '');
-    if (!url.endsWith('/chat/completions')) {
-        if (url.endsWith('/v1')) url += '/chat/completions';
-        else if (!url.includes('/v1')) url += '/v1/chat/completions';
-        else url += '/chat/completions';
+function renderModelSelects(filterText = '') {
+    const $sel = $('#savedModelSelect');
+    const $bSel = $('#blackModelSelect');
+    
+    let currentVal = $sel.val();
+    let currentBVal = $bSel.val();
+
+    $sel.empty().append('<option value="">-- Chọn Model Trắng từ kho --</option>');
+    $bSel.empty().append('<option value="">-- Chọn Model Đen từ kho --</option>');
+
+    let keys = Object.keys(modelRegistry);
+    if(keys.length === 0) {
+        $sel.append('<option value="" disabled>Kho trống, hãy bấm Quét model</option>');
+        $bSel.append('<option value="" disabled>Kho trống, hãy bấm Quét model</option>');
+        return;
     }
-    return url;
+
+    let lowerFilter = filterText.toLowerCase();
+    keys.forEach(mId => {
+        if(!lowerFilter || mId.toLowerCase().includes(lowerFilter)) {
+            let info = modelRegistry[mId];
+            let labelText = `${mId} (${info.provider})`;
+            $sel.append(`<option value="${mId}">${labelText}</option>`);
+            $bSel.append(`<option value="${mId}">${labelText}</option>`);
+        }
+    });
+
+    if(modelRegistry[currentVal]) $sel.val(currentVal);
+    if(modelRegistry[currentBVal]) $bSel.val(currentBVal);
+}
+
+function filterModelList() {
+    let query = $('#modelSearch').val();
+    renderModelSelects(query);
+}
+
+function onSelectedModelChange() {
+    let mId = $('#savedModelSelect').val();
+    if(!mId || !modelRegistry[mId]) return;
+    let info = modelRegistry[mId];
+
+    $('#providerName').val(info.provider);
+    $('#apiEndpoint').val(info.endpoint);
+    $('#apiKey').val(info.apiKey);
+    $('#authType').val(info.authType);
+    log('SYS', `Đã tự động cấu hình theo Model: ${mId}`);
+}
+
+function onBlackModelChange() {
+    let mId = $('#blackModelSelect').val();
+    if(!mId || !modelRegistry[mId]) return;
+    let info = modelRegistry[mId];
+
+    $('#blackEndpoint').val(info.endpoint);
+    $('#blackApiKey').val(info.apiKey);
+    $('#blackAuthType').val(info.authType);
 }
 
 async function fetchModels() {
-    let provider = $('#providerName').val().trim();
-    let endpoint = formatEndpoint($('#apiEndpoint').val().trim());
+    let endpoint = $('#apiEndpoint').val().trim();
     let apiKey = $('#apiKey').val().trim();
     let authType = $('#authType').val();
+    let provider = $('#providerName').val().trim() || 'Custom Provider';
 
-    if (!apiKey) { alert('Vui lòng nhập API Key trước!'); return; }
+    if (!apiKey) { alert('Vui lòng nhập API Key trước khi quét!'); return; }
+    if (!endpoint) { alert('Vui lòng nhập API Endpoint!'); return; }
     
-    log('SYS', 'Đang tự động quét model qua các Provider nổi tiếng (Ưu tiên OpenAI & Anthropic)...');
+    log('SYS', `Đang quét model trực tiếp từ Endpoint: [${endpoint}]...`);
 
     try {
         const res = await fetch('/api/models', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ target_endpoint: endpoint, api_key: apiKey, auth_type: authType })
+            body: JSON.stringify({ target_endpoint: endpoint, api_key: apiKey, auth_type: authType, provider: provider })
         });
         const data = await res.json();
         
         if (res.ok && data.models && data.models.length > 0) {
-            let modelIds = data.models;
-            $('#modelInput').val(modelIds[0]);
-            log('SUCCESS', `Tìm thấy ${modelIds.length} models từ [${data.provider_used}]. Model đầu tiên: ${modelIds[0]}`);
-            alert(`Lấy thành công qua ${data.provider_used}!\nĐã chọn model: ${modelIds[0]}`);
+            let countNew = 0;
+            data.models.forEach(mId => {
+                if(!modelRegistry[mId]) countNew++;
+                modelRegistry[mId] = {
+                    provider: provider,
+                    endpoint: endpoint,
+                    apiKey: apiKey,
+                    authType: authType
+                };
+            });
+
+            localStorage.setItem('ai_chess_model_registry', JSON.stringify(modelRegistry));
+            renderModelSelects();
+
+            log('SUCCESS', `Quét thành công! Thêm mới ${countNew} model. Tổng kho hiện có: ${Object.keys(modelRegistry).length} models.`);
+            alert(`Quét thành công qua [${provider}]!\nĐã cộng dồn vào kho vĩnh viễn.`);
         } else {
-            throw new Error(data.error || 'Không tìm thấy model nào từ các endpoint.');
+            throw new Error(data.error || 'Không tìm thấy model nào.');
         }
     } catch (err) {
-        log('ERROR', `Lỗi lấy models: ${err.message}`);
+        log('ERROR', `Lỗi quét models: ${err.message}`);
         alert('Lỗi: ' + err.message);
     }
 }
 
-async function testConnection() {
-    let endpoint = formatEndpoint($('#apiEndpoint').val().trim());
-    let apiKey = $('#apiKey').val().trim();
-    let authType = $('#authType').val();
-    let model = $('#modelInput').val().trim();
+function clearSavedModels() {
+    if(confirm('Bạn có chắc chắn muốn xóa toàn bộ kho model đã lưu vĩnh viễn không?')) {
+        modelRegistry = {};
+        localStorage.removeItem('ai_chess_model_registry');
+        renderModelSelects();
+        log('SYS', 'Đã xóa sạch kho model.');
+    }
+}
 
-    if (!apiKey || !endpoint) { alert('Nhập đủ API Key và Endpoint!'); return; }
+async function testConnection() {
+    let mId = $('#savedModelSelect').val();
+    if(!mId) { alert('Vui lòng chọn 1 model từ kho để Test!'); return; }
+    let info = modelRegistry[mId];
+
     try {
         const res = await fetch('/api/test', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ target_endpoint: endpoint, api_key: apiKey, auth_type: authType, model: model })
+            body: JSON.stringify({ target_endpoint: info.endpoint, api_key: info.apiKey, auth_type: info.authType, model: mId })
         });
-        if (res.ok) alert('Kết nối thành công qua Proxy!');
-        else alert('Kết nối thất bại.');
+        const data = await res.json();
+        if (res.ok) alert(`Kết nối model [${mId}] thành công! Mã: ${data.code}`);
+        else alert('Kết nối thất bại: ' + data.error);
     } catch (err) { alert('Lỗi: ' + err.message); }
 }
 
 function handleSquareClick(square) {
     let mode = $('#gameMode').val();
-    if (mode === 'ai_vs_ai') return; // Chế độ AI vs AI không cho người click điều khiển
+    if (mode === 'ai_vs_ai') return;
 
     if (!isRunning || game.game_over()) return;
     const playerColor = $('#playerColor').val();
@@ -332,17 +414,13 @@ function handleSquareClick(square) {
 
 function startGame() {
     let mode = $('#gameMode').val();
-    let endpoint = formatEndpoint($('#apiEndpoint').val().trim());
-    let apiKey = $('#apiKey').val().trim();
-    let model = $('#modelInput').val().trim();
+    let whiteModel = $('#savedModelSelect').val();
 
-    if (!apiKey || !endpoint || !model) { alert('Vui lòng điền đủ thông tin cấu hình AI Trắng!'); return; }
+    if (!whiteModel) { alert('Vui lòng chọn Model Trắng từ kho model!'); return; }
 
     if (mode === 'ai_vs_ai') {
-        let bEndpoint = formatEndpoint($('#blackEndpoint').val().trim());
-        let bApiKey = $('#blackApiKey').val().trim() || apiKey;
-        let bModel = $('#blackModelInput').val().trim();
-        if (!bModel) { alert('Vui lòng nhập model cho AI Đen!'); return; }
+        let blackModel = $('#blackModelSelect').val();
+        if (!blackModel) { alert('Vui lòng chọn Model Đen từ kho cho AI Đen!'); return; }
     }
 
     game.reset();
@@ -363,8 +441,7 @@ function startGame() {
     $('#stopBtn').show();
     $('#logBox').empty();
     
-    let provider = $('#providerName').val().trim();
-    log('SYSTEM', `--- Bắt đầu ván đấu (${mode === 'ai_vs_ai' ? 'AI vs AI' : provider}) ---`);
+    log('SYSTEM', `--- Bắt đầu ván đấu (${mode === 'ai_vs_ai' ? 'AI vs AI' : 'Người vs AI'}) ---`);
     updateStatus('Đang trong trận đấu');
 
     if (mode === 'ai_vs_ai') {
@@ -386,19 +463,17 @@ function stopGame() {
     updateStatus('Đã dừng');
 }
 
-// Xử lý nước đi cho chế độ Người vs AI
 async function triggerAiMove() {
     if (!isRunning || game.game_over()) return;
-    let endpoint = formatEndpoint($('#apiEndpoint').val().trim());
-    let apiKey = $('#apiKey').val().trim();
-    let authType = $('#authType').val();
-    let model = $('#modelInput').val().trim();
+    let model = $('#savedModelSelect').val();
+    let info = modelRegistry[model];
+    if(!info) { stopGame(); return; }
 
     updateStatus(`AI (${model}) đang suy nghĩ...`);
     const possibleMoves = game.moves();
     const promptText = `You are playing chess. Current FEN: ${game.fen()}. Legal moves: ${possibleMoves.join(', ')}. Choose the best move in SAN format (e.g. e4, Nf3). Reply with ONLY the move notation.`;
 
-    log('API_REQ', `Model: ${model} | Gửi request qua Proxy...`);
+    log('API_REQ', `Model: ${model} | Gửi request...`);
     try {
         const res = await fetch('/api/chat', {
             method: 'POST',
@@ -407,9 +482,9 @@ async function triggerAiMove() {
                 model: model,
                 messages: [{ role: 'user', content: promptText }],
                 temperature: 0.2,
-                target_endpoint: endpoint,
-                api_key: apiKey,
-                auth_type: authType
+                target_endpoint: info.endpoint,
+                api_key: info.apiKey,
+                auth_type: info.authType
             })
         });
         const text = await res.text();
@@ -417,13 +492,11 @@ async function triggerAiMove() {
         const data = JSON.parse(text);
         
         let aiMoveStr = data.choices[0].message.content.trim().replace(/['"`]/g, '');
-        
-        // Cơ chế an toàn tuyệt đối tránh lỗi Cannot read properties of null (reading 'san')
         let move = game.move(aiMoveStr);
         if (!move) {
             let matched = game.moves({verbose:true}).find(m => m.san.toLowerCase() === aiMoveStr.toLowerCase() || m.lan.toLowerCase() === aiMoveStr.toLowerCase());
             if (matched) move = game.move(matched);
-            else move = game.move(game.moves()[0]); // Lấy nước đi hợp lệ đầu tiên nếu AI trả về sai định dạng
+            else move = game.move(game.moves()[0]);
         }
 
         board.position(game.fen());
@@ -438,24 +511,13 @@ async function triggerAiMove() {
     }
 }
 
-// Xử lý nước đi cho chế độ AI vs AI độc lập 2 bên
 async function triggerAiVsAiMove() {
     if (!isRunning || game.game_over()) return;
     
-    let turn = game.turn(); // 'w' hoặc 'b'
-    let endpoint, apiKey, authType, model;
-
-    if (turn === 'w') {
-        endpoint = formatEndpoint($('#apiEndpoint').val().trim());
-        apiKey = $('#apiKey').val().trim();
-        authType = $('#authType').val();
-        model = $('#modelInput').val().trim();
-    } else {
-        endpoint = formatEndpoint($('#blackEndpoint').val().trim());
-        apiKey = $('#blackApiKey').val().trim() || $('#apiKey').val().trim();
-        authType = $('#blackAuthType').val();
-        model = $('#blackModelInput').val().trim();
-    }
+    let turn = game.turn();
+    let model = turn === 'w' ? $('#savedModelSelect').val() : $('#blackModelSelect').val();
+    let info = modelRegistry[model];
+    if(!info) { stopGame(); return; }
 
     updateStatus(`AI ${turn === 'w' ? 'Trắng' : 'Đen'} (${model}) đang suy nghĩ...`);
     const possibleMoves = game.moves();
@@ -470,9 +532,9 @@ async function triggerAiVsAiMove() {
                 model: model,
                 messages: [{ role: 'user', content: promptText }],
                 temperature: 0.2,
-                target_endpoint: endpoint,
-                api_key: apiKey,
-                auth_type: authType
+                target_endpoint: info.endpoint,
+                api_key: info.apiKey,
+                auth_type: info.authType
             })
         });
         const text = await res.text();
@@ -480,7 +542,6 @@ async function triggerAiVsAiMove() {
         const data = JSON.parse(text);
         
         let aiMoveStr = data.choices[0].message.content.trim().replace(/['"`]/g, '');
-        
         let move = game.move(aiMoveStr);
         if (!move) {
             let matched = game.moves({verbose:true}).find(m => m.san.toLowerCase() === aiMoveStr.toLowerCase() || m.lan.toLowerCase() === aiMoveStr.toLowerCase());
@@ -498,7 +559,10 @@ async function triggerAiVsAiMove() {
         }
     } catch (err) {
         log('ERROR', `Lỗi AI vs AI: ${err.message}`);
-        stopGame();
+        if (isRunning) {
+            log('SYSTEM', 'Thử lại lượt đi sau 3 giây...');
+            aiTimeout = setTimeout(triggerAiVsAiMove, 3000);
+        }
     }
 }
 
@@ -509,7 +573,7 @@ async function executeTerminalCommand() {
     let isDownloadCmd = cmd.includes('pip install') || cmd.includes('apt-get') || cmd.includes('wget') || cmd.includes('curl') || cmd.includes('git clone');
     if (isDownloadCmd) {
         let estimatedMB = (Math.random() * 40 + 10).toFixed(1);
-        let confirmAction = confirm(`⚠️ CẢNH BÁO TẢI TỆP/GÓI TRÊN RENDER:\\nBạn chuẩn bị chạy lệnh tải dung lượng ước tính khoảng ~${estimatedMB} MB trên gói Free (512MB RAM).\\n\\nBạn có muốn tiếp tục (YES) hay Hủy (NO)?`);
+        let confirmAction = confirm(`⚠️ CẢNH BÁO TẢI TỆP/GÓI TRÊN RENDER:\\nBạn chuẩn bị chạy lệnh tải dung lượng khoảng ~${estimatedMB} MB trên gói Free (512MB RAM).\\n\\nBạn có muốn tiếp tục (YES) hay Hủy (NO)?`);
         if (!confirmAction) {
             $('#termOutput').append(`\\n$ ${cmd}\\n[HỦY BỎ] Đã dừng lệnh tải theo yêu cầu người dùng.\\n`);
             $('#termCmd').val('');
@@ -546,6 +610,7 @@ $(document).ready(function() {
         const square = $(this).attr('data-square');
         if (square) handleSquareClick(square);
     });
+    renderModelSelects();
     setTimeout(() => board.resize(), 300);
 });
 </script>
@@ -564,6 +629,13 @@ def build_auth_header(auth_type, api_key):
         bearer = api_key if api_key.startswith('Bearer ') else f"Bearer {api_key}"
         return {"Authorization": bearer, "Content-Type": "application/json"}
 
+def clean_base_url(url):
+    url = url.strip().rstrip('/')
+    for suffix in ['/chat/completions', '/completions', '/models', '/chat']:
+        if url.endswith(suffix):
+            url = url[:-len(suffix)].rstrip('/')
+    return url
+
 @app.route('/api/models', methods=['POST'])
 def api_models():
     try:
@@ -572,60 +644,42 @@ def api_models():
         api_key = data.get('api_key', '')
         auth_type = data.get('auth_type', 'Bearer')
 
-        base_urls = []
-        if target_url:
-            cleaned = target_url.replace('/chat/completions', '').replace('/models', '').rstrip('/')
-            base_urls.append(cleaned)
-
-        popular_providers = [
-            "https://api.openai.com/v1",
-            "https://api.anthropic.com/v1",
-            "https://openrouter.ai/api/v1",
-            "https://api.deepseek.com/v1",
-            "https://generativelanguage.googleapis.com/v1beta/openai",
-            target_url
-        ]
-        
-        for url in popular_providers:
-            if url and url not in base_urls:
-                base_urls.append(url)
+        base_url = clean_base_url(target_url)
+        models_url = f"{base_url}/models"
 
         headers = build_auth_header(auth_type, api_key)
+        # Ép chuỗi User-Agent sang ASCII chuẩn để tránh lỗi mã hóa ký tự Latin-1
         headers["User-Agent"] = "claude-cli/1.0.0 (external, cli)"
+        
         chosen_proxy = get_next_proxy()
         proxies = {"http": chosen_proxy, "https": chosen_proxy}
 
-        last_error = ""
-        for base in base_urls:
-            models_url = f"{base.rstrip('/')}/models"
-            try:
-                response = crequests.get(models_url, headers=headers, proxies=proxies, impersonate="chrome120", timeout=10, allow_redirects=False)
-                if response.status_code == 200:
-                    res_json = response.json()
-                    model_list = []
-                    
-                    raw_data = res_json.get('data', res_json.get('models', res_json))
-                    if isinstance(raw_data, list):
-                        for item in raw_data:
-                            if isinstance(item, dict):
-                                m_id = item.get('id') or item.get('name') or item.get('model')
-                                if m_id: model_list.append(str(m_id))
-                            elif isinstance(item, str):
-                                model_list.append(item)
-                    elif isinstance(raw_data, dict):
-                        for k, v in raw_data.items():
-                            if isinstance(v, str): model_list.append(v)
-                            elif isinstance(v, dict):
-                                m_id = v.get('id') or v.get('name')
-                                if m_id: model_list.append(str(m_id))
+        response = crequests.get(models_url, headers=headers, proxies=proxies, impersonate="chrome120", timeout=15, allow_redirects=False)
+        if response.status_code == 200:
+            res_json = response.json()
+            model_list = []
+            
+            raw_data = res_json.get('data', res_json.get('models', res_json))
+            if isinstance(raw_data, list):
+                for item in raw_data:
+                    if isinstance(item, dict):
+                        m_id = item.get('id') or item.get('name') or item.get('model')
+                        if m_id: model_list.append(str(m_id))
+                    elif isinstance(item, str):
+                        model_list.append(item)
+            elif isinstance(raw_data, dict):
+                for k, v in raw_data.items():
+                    if isinstance(v, str): model_list.append(v)
+                    elif isinstance(v, dict):
+                        m_id = v.get('id') or v.get('name')
+                        if m_id: model_list.append(str(m_id))
 
-                    if model_list:
-                        return jsonify({"models": model_list, "provider_used": base}), 200
-            except Exception as e:
-                last_error = str(e)
-                continue
-
-        return jsonify({"error": f"Không thể lấy model từ bất kỳ Provider nào. Lỗi gần nhất: {last_error}"}), 400
+            if model_list:
+                return jsonify({"models": model_list}), 200
+            else:
+                return jsonify({"error": "Endpoint trả về 200 nhưng không tìm thấy cấu trúc danh sách model."}), 400
+        else:
+            return jsonify({"error": f"Lỗi HTTP {response.status_code}: {response.text[:200]}"}), 400
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -639,16 +693,19 @@ def api_test():
         auth_type = data.get('auth_type', 'Bearer')
         model = data.get('model', 'gpt-4o')
 
+        base_url = clean_base_url(target_url)
+        chat_url = f"{base_url}/chat/completions"
+
         headers = build_auth_header(auth_type, api_key)
         headers["User-Agent"] = "claude-cli/1.0.0 (external, cli)"
         payload = {"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 5}
         chosen_proxy = get_next_proxy()
         proxies = {"http": chosen_proxy, "https": chosen_proxy}
 
-        response = crequests.post(target_url, headers=headers, json=payload, proxies=proxies, impersonate="chrome120", timeout=20, allow_redirects=False)
-        if response.status_code in [200, 400, 404, 422]:
-            return jsonify({"status": "ok", "code": response.status_code}), 200
-        return response.text, response.status_code
+        response = crequests.post(chat_url, headers=headers, json=payload, proxies=proxies, impersonate="chrome120", timeout=20, allow_redirects=False)
+        if response.status_code in [200, 400, 404, 422, 403]:
+            return jsonify({"status": "ok", "code": response.status_code, "error": response.text[:200]}), 200
+        return jsonify({"error": response.text[:200]}), response.status_code
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -664,12 +721,15 @@ def proxy_chat():
         if not target_url:
             return jsonify({"error": "Thiếu API Endpoint"}), 400
 
+        base_url = clean_base_url(target_url)
+        chat_url = f"{base_url}/chat/completions"
+
         headers = build_auth_header(auth_type, api_key)
         headers["User-Agent"] = "claude-cli/1.0.0 (external, cli)"
         chosen_proxy = get_next_proxy()
         proxies = {"http": chosen_proxy, "https": chosen_proxy}
 
-        response = crequests.post(target_url, headers=headers, json=payload, proxies=proxies, impersonate="chrome120", timeout=25, allow_redirects=False)
+        response = crequests.post(chat_url, headers=headers, json=payload, proxies=proxies, impersonate="chrome120", timeout=60, allow_redirects=False)
         if response.status_code == 200:
             return jsonify(response.json()), 200
         return jsonify({"error": f"Lỗi HTTP {response.status_code}: {response.text[:200]}"}), 500
