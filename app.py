@@ -5,7 +5,6 @@ from curl_cffi import requests as crequests
 
 app = Flask(__name__)
 
-# Danh sách 3 proxy HTTP của bạn
 PROXY_LIST = [
     "http://pilcikkg:esenmppky29k@198.23.243.226:6361",
     "http://pilcikkg:esenmppky29k@38.154.185.97:6370",
@@ -26,7 +25,7 @@ HTML_TEMPLATE = """
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Cờ Vua AI - Flexible Gateway</title>
+<title>Cờ Vua AI - Gateway</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
@@ -76,8 +75,8 @@ button:hover { opacity: 0.9; }
             </div>
         </div>
         <div class="form-group">
-            <label>Tên Model AI (Có thể tự gõ hoặc bấm Lấy danh sách)</label>
-            <input type="text" id="modelInput" placeholder="vd: claude-opus-5, gpt-4o, ..." value="claude-opus-5">
+            <label>Tên Model AI (Ví dụ: gpt-4o, claude-3-5-sonnet, ...)</label>
+            <input type="text" id="modelInput" placeholder="vd: gpt-4o, claude-3-5-sonnet" value="gpt-4o">
         </div>
         <div class="row">
             <button class="btn-success" onclick="fetchModels()" style="flex: 1;">Lấy danh sách Model</button>
@@ -162,7 +161,6 @@ async function fetchModels() {
         if (res.ok && data.data) {
             let modelIds = data.data.map(m => m.id);
             log('SUCCESS', `Tìm thấy ${modelIds.length} models: ${modelIds.slice(0, 5).join(', ')}...`);
-            // Điền model đầu tiên tìm được vào ô model hoặc hiển thị thông báo
             if (modelIds.length > 0) {
                 $('#modelInput').val(modelIds[0]);
                 alert(`Đã lấy thành công! Model đầu tiên được tự điền: ${modelIds[0]}`);
@@ -356,7 +354,6 @@ def api_models():
         api_key = data.get('api_key', '')
         auth_type = data.get('auth_type', 'Bearer')
 
-        # Tự động suy ra endpoint /models từ chat endpoint
         if '/chat/completions' in target_url:
             models_url = target_url.replace('/chat/completions', '/models')
         elif target_url.endswith('/'):
@@ -373,11 +370,11 @@ def api_models():
         response = crequests.get(models_url, headers=headers, proxies=proxies, impersonate="chrome120", timeout=20)
         
         try:
-            response.json()
-            return response.text, response.status_code, [('Content-Type', 'application/json')]
-        except json.JSONDecodeError:
+            res_json = response.json()
+            return jsonify(res_json), response.status_code
+        except Exception:
             snippet = response.text[:200].replace('\n', ' ')
-            return jsonify({"error": f"Server không trả về JSON (HTTP {response.status_code}): {snippet}"}), 500
+            return jsonify({"error": f"Server không trả về JSON hợp lệ (HTTP {response.status_code}): {snippet}"}), 500
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -389,7 +386,7 @@ def api_test():
         target_url = data.get('target_endpoint')
         api_key = data.get('api_key')
         auth_type = data.get('auth_type', 'Bearer')
-        model = data.get('model', 'gpt-3.5-turbo')
+        model = data.get('model', 'gpt-4o')
 
         headers = build_auth_header(auth_type, api_key)
         headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"
@@ -438,9 +435,9 @@ def proxy_chat():
 
         if response.status_code == 200:
             try:
-                response.json()
-                return response.text, 200, [('Content-Type', 'application/json')]
-            except json.JSONDecodeError:
+                res_json = response.json()
+                return jsonify(res_json), 200
+            except Exception:
                 snippet = response.text[:300].replace('\n', ' ')
                 return jsonify({"error": f"API trả về Non-JSON: {snippet}"}), 500
 
