@@ -5,7 +5,7 @@ from curl_cffi import requests as crequests
 
 app = Flask(__name__)
 
-# Danh sách proxy đã chuyển sang định dạng HTTP (bạn có thể điều chỉnh lại số port phía sau nếu nhà cung cấp dùng port HTTP riêng)
+# Danh sách 3 proxy HTTP của bạn
 PROXY_LIST = [
     "http://pilcikkg:esenmppky29k@198.23.243.226:6361",
     "http://pilcikkg:esenmppky29k@38.154.185.97:6370",
@@ -26,7 +26,7 @@ HTML_TEMPLATE = """
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Cờ Vua AI - Proxy HTTP Rotation</title>
+<title>Cờ Vua AI - Pro Gateway</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
@@ -34,17 +34,20 @@ body { background: #0f172a; color: #f8fafc; min-height: 100vh; display: flex; fl
 .container { max-width: 480px; width: 100%; display: flex; flex-direction: column; gap: 12px; }
 .card { background: #1e293b; border-radius: 12px; padding: 12px; border: 1px solid #334155; }
 #board { width: 100%; aspect-ratio: 1/1; margin: 0 auto; }
-h1 { font-size: 1.2rem; text-align: center; color: #38bdf8; margin-bottom: 8px; }
+h1 { font-size: 1.1rem; text-align: center; color: #38bdf8; margin-bottom: 8px; }
 .form-group { margin-bottom: 8px; }
-label { display: block; font-size: 0.8rem; margin-bottom: 3px; color: #94a3b8; }
-input, select, button { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: #fff; font-size: 0.85rem; }
-button { background: #0284c7; font-weight: bold; cursor: pointer; margin-top: 5px; border: none; }
+label { display: block; font-size: 0.75rem; margin-bottom: 2px; color: #94a3b8; }
+input, select, button { width: 100%; padding: 7px 10px; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: #fff; font-size: 0.8rem; }
+.row { display: flex; gap: 6px; }
+button { background: #0284c7; font-weight: bold; cursor: pointer; margin-top: 4px; border: none; }
+button:hover { opacity: 0.9; }
+.btn-success { background: #16a34a !important; }
 .btn-danger { background: #dc2626 !important; }
 .btn-secondary { background: #475569 !important; font-size: 0.75rem; padding: 5px 8px; margin-top: 4px; }
-.status-box { margin-top: 8px; padding: 6px; background: #0f172a; border-radius: 6px; border: 1px solid #334155; font-size: 0.8rem; font-weight: bold; color: #38bdf8; }
-.log-header { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; margin-bottom: 4px; }
-.log-header span { font-size: 0.8rem; font-weight: bold; color: #94a3b8; }
-.log-box { height: 200px; overflow-y: auto; background: #020617; border-radius: 6px; border: 1px solid #334155; padding: 8px; font-family: 'Courier New', Courier, monospace; font-size: 0.72rem; color: #38bdf8; white-space: pre-wrap; word-break: break-all; }
+.status-box { margin-top: 6px; padding: 6px; background: #0f172a; border-radius: 6px; border: 1px solid #334155; font-size: 0.75rem; font-weight: bold; color: #38bdf8; }
+.log-header { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; margin-bottom: 2px; }
+.log-header span { font-size: 0.75rem; font-weight: bold; color: #94a3b8; }
+.log-box { height: 140px; overflow-y: auto; background: #020617; border-radius: 6px; border: 1px solid #334155; padding: 6px; font-family: 'Courier New', Courier, monospace; font-size: 0.7rem; color: #38bdf8; white-space: pre-wrap; word-break: break-all; }
 .highlight-square { background-color: rgba(255, 255, 0, 0.4) !important; }
 .highlight-hint { background: radial-gradient(circle, rgba(16, 185, 129, 0.7) 28%, transparent 28%) !important; }
 </style>
@@ -52,57 +55,67 @@ button { background: #0284c7; font-weight: bold; cursor: pointer; margin-top: 5p
 <body>
 
 <div class="container">
-    <h1>Cờ Vua AI (HTTP Proxy)</h1>
+    <h1>Cờ Vua AI - Pro Gateway</h1>
     <div class="card"><div id="board"></div></div>
     <div class="card">
         <div class="form-group">
-            <label>API Endpoint</label>
-            <input type="text" id="apiEndpoint" value="https://tabitoken.com/v1/chat/completions">
+            <label>Chọn Provider / Mẫu nhanh</label>
+            <select id="providerSelect" onchange="handleProviderChange()">
+                <option value="custom">Tùy chỉnh (Custom Endpoint)</option>
+                <option value="https://tabitoken.com/v1">TabiToken</option>
+                <option value="https://api.justwoker.icu/v1">JustWoker API</option>
+                <option value="https://api.openai.com/v1">OpenAI Official</option>
+                <option value="https://api.anthropic.com/v1">Anthropic Official</option>
+            </select>
         </div>
         <div class="form-group">
-            <label>API Key (sk-...)</label>
-            <input type="text" id="apiKey" placeholder="Dán API Key...">
+            <label>API Endpoint (Chat Completions URL)</label>
+            <input type="text" id="apiEndpoint" value="https://tabitoken.com/v1/chat/completions">
+        </div>
+        <div class="row">
+            <div class="form-group" style="flex: 2;">
+                <label>API Key</label>
+                <input type="password" id="apiKey" placeholder="Dán API Key...">
+            </div>
+            <div class="form-group" style="flex: 1;">
+                <label>Kiểu Auth Header</label>
+                <select id="authType">
+                    <option value="Bearer">Bearer Token</option>
+                    <option value="x-api-key">x-api-key</option>
+                </select>
+            </div>
+        </div>
+        <div class="row">
+            <button class="btn-success" onclick="fetchModels()" style="flex: 1;">Lấy danh sách Model</button>
+            <button onclick="testConnection()" style="flex: 1; background: #0d9488;">Test Connect</button>
+        </div>
+        <div class="form-group" style="margin-top: 6px;">
+            <label>Chọn Model AI</label>
+            <select id="modelSelect">
+                <option value="claude-opus-5">claude-opus-5 (Nhập trước hoặc bấm Lấy Model)</option>
+            </select>
         </div>
         <div class="form-group">
             <label>Chế độ chơi</label>
-            <select id="gameMode" onchange="handleModeChange()">
+            <select id="gameMode">
                 <option value="pvai">Người vs AI</option>
-                <option value="aivai">AI vs AI (4.8 vs 5)</option>
             </select>
         </div>
-        <div id="pvaiSettings">
-            <div class="form-group">
-                <label>Chọn Model AI</label>
-                <select id="singleAiModel">
-                    <option value="claude-opus-5">claude-opus-5</option>
-                    <option value="claude-opus-4.8">claude-opus-4.8</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Bạn cầm quân</label>
-                <select id="playerColor">
-                    <option value="w">Trắng</option>
-                    <option value="b">Đen</option>
-                </select>
-            </div>
-        </div>
-        <div id="aivaiSettings" style="display: none;">
-            <div class="form-group">
-                <label>Cấu hình Trắng / Đen</label>
-                <select id="aiAssignment">
-                    <option value="48_vs_5">Trắng: claude-opus-4.8 | Đen: claude-opus-5</option>
-                    <option value="5_vs_48">Trắng: claude-opus-5 | Đen: claude-opus-4.8</option>
-                </select>
-            </div>
+        <div class="form-group">
+            <label>Bạn cầm quân</label>
+            <select id="playerColor">
+                <option value="w">Trắng</option>
+                <option value="b">Đen</option>
+            </select>
         </div>
         <button id="startBtn" onclick="startGame()">Bắt Đầu Ván Mới</button>
         <button id="stopBtn" class="btn-danger" onclick="stopGame()" style="display: none;">Dừng Trận Đấu</button>
         <div class="status-box" id="statusBox">Trạng thái: Sẵn sàng</div>
         <div class="log-header">
-            <span>FULL DEBUG LOG</span>
+            <span>DEBUG LOG</span>
             <div>
-                <button class="btn-secondary" onclick="copyLog()">Copy Log</button>
-                <button class="btn-secondary" onclick="clearLog()">Xóa Log</button>
+                <button class="btn-secondary" onclick="copyLog()">Copy</button>
+                <button class="btn-secondary" onclick="clearLog()">Xóa</button>
             </div>
         </div>
         <div class="log-box" id="logBox"></div>
@@ -125,10 +138,11 @@ function chessDotComPieceTheme(piece) {
     return `https://images.chesscomfiles.com/chess-themes/pieces/neo/150/${color}${type}.png`;
 }
 
-function handleModeChange() {
-    const mode = $('#gameMode').val();
-    if (mode === 'pvai') { $('#pvaiSettings').show(); $('#aivaiSettings').hide(); }
-    else { $('#pvaiSettings').hide(); $('#aivaiSettings').show(); }
+function handleProviderChange() {
+    const val = $('#providerSelect').val();
+    if (val !== 'custom') {
+        $('#apiEndpoint').val(val + '/chat/completions');
+    }
 }
 
 function log(type, msg) {
@@ -143,8 +157,80 @@ function copyLog() { navigator.clipboard.writeText($('#logBox').text()).then(() 
 function updateStatus(msg) { $('#statusBox').text('Trạng thái: ' + msg); }
 function removeHighlights() { $('#board .square-55d63').removeClass('highlight-square highlight-hint'); }
 
+function getRequestConfig() {
+    let endpoint = $('#apiEndpoint').val().trim();
+    let apiKey = $('#apiKey').val().trim();
+    let authType = $('#authType').val();
+    return { endpoint, apiKey, authType };
+}
+
+async function fetchModels() {
+    let cfg = getRequestConfig();
+    if (!cfg.apiKey) { alert('Vui lòng nhập API Key trước!'); return; }
+    
+    // Tự động suy ra base url lấy models từ chat endpoint
+    let modelsUrl = cfg.endpoint.replace(/\/chat\/completions$/, '/models');
+    log('SYS', `Đang tải danh sách model từ: ${modelsUrl}`);
+
+    try {
+        const res = await fetch('/api/models', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                target_endpoint: modelsUrl,
+                api_key: cfg.apiKey,
+                auth_type: cfg.authType
+            })
+        });
+        const data = await res.json();
+        if (res.ok && data.data) {
+            let select = $('#modelSelect');
+            select.empty();
+            data.data.forEach(m => {
+                select.append(`<option value="${m.id}">${m.id}</option>`);
+            });
+            log('SUCCESS', `Đã tải thành công ${data.data.length} models!`);
+            alert('Đã cập nhật danh sách model thành công!');
+        } else {
+            throw new Error(data.error || 'Không thể lấy danh sách model');
+        }
+    } catch (err) {
+        log('ERROR', `Lỗi lấy models: ${err.message}`);
+        alert('Lỗi: ' + err.message);
+    }
+}
+
+async function testConnection() {
+    let cfg = getRequestConfig();
+    if (!cfg.apiKey || !cfg.endpoint) { alert('Nhập đủ API Key và Endpoint!'); return; }
+    log('SYS', 'Đang test kết nối qua Proxy Gateway...');
+
+    try {
+        const res = await fetch('/api/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                target_endpoint: cfg.endpoint,
+                api_key: cfg.apiKey,
+                auth_type: cfg.authType
+            })
+        });
+        const text = await res.text();
+        if (res.ok) {
+            log('SUCCESS', 'Kết nối thành công qua Proxy!');
+            alert('Kết nối thành công!');
+        } else {
+            log('ERROR', `Test thất bại: ${text}`);
+            alert('Kết nối thất bại: ' + text);
+        }
+    } catch (err) {
+        log('ERROR', `Lỗi kết nối: ${err.message}`);
+        alert('Lỗi: ' + err.message);
+    }
+}
+
 function handleSquareClick(square) {
-    if (!isRunning || $('#gameMode').val() === 'aivai' || game.game_over()) return;
+    if (!isRunning || game.game_over()) return;
     const playerColor = $('#playerColor').val();
     if ((game.turn() === 'w' && playerColor !== 'w') || (game.turn() === 'b' && playerColor !== 'b')) return;
 
@@ -162,8 +248,7 @@ function handleSquareClick(square) {
         selectedSquare = null;
         if (move !== null) {
             board.position(game.fen());
-            log('MOVE', `Bạn đi: ${move.san} | FEN mới: ${game.fen()}`);
-            checkGameState();
+            log('MOVE', `Bạn đi: ${move.san}`);
             if (isRunning && !game.game_over()) setTimeout(triggerAiMove, 300);
         } else {
             const piece = game.get(square);
@@ -172,38 +257,28 @@ function handleSquareClick(square) {
     }
 }
 
-function checkGameState() {
-    if (game.in_checkmate()) { log('GAME', 'Kết thúc: CHIẾU BÍ'); updateStatus('Chiếu bí!'); stopGame(); }
-    else if (game.in_draw()) { log('GAME', 'Kết thúc: HÒA'); updateStatus('Hòa!'); stopGame(); }
-}
-
 function startGame() {
-    let apiKey = $('#apiKey').val().trim();
-    let endpoint = $('#apiEndpoint').val().trim();
-    if (!apiKey) { alert('Vui lòng nhập API Key!'); return; }
-    if (!endpoint) { alert('Vui lòng nhập Endpoint!'); return; }
-
-    localStorage.setItem('tabi_api_key', apiKey);
-    localStorage.setItem('tabi_endpoint', endpoint);
+    let cfg = getRequestConfig();
+    if (!cfg.apiKey) { alert('Vui lòng nhập API Key!'); return; }
+    if (!cfg.endpoint) { alert('Vui lòng nhập Endpoint!'); return; }
 
     game.reset();
     isRunning = true;
     selectedSquare = null;
     removeHighlights();
 
-    const mode = $('#gameMode').val();
     const playerColor = $('#playerColor').val();
-    board.orientation(mode === 'pvai' && playerColor === 'b' ? 'black' : 'white');
+    board.orientation(playerColor === 'b' ? 'black' : 'white');
     board.position(game.fen());
     board.resize();
 
     $('#startBtn').hide();
     $('#stopBtn').show();
     clearLog();
-    log('SYSTEM', '--- Bắt đầu ván đấu mới ---');
+    log('SYSTEM', '--- Bắt đầu ván đấu ---');
     updateStatus('Đang trong trận đấu');
 
-    if (mode === 'aivai' || (mode === 'pvai' && playerColor === 'b')) triggerAiMove();
+    if (playerColor === 'b') triggerAiMove();
 }
 
 function stopGame() {
@@ -219,66 +294,53 @@ function stopGame() {
 
 async function triggerAiMove() {
     if (!isRunning || game.game_over()) return;
-    let apiKey = $('#apiKey').val().trim();
-    let endpoint = $('#apiEndpoint').val().trim();
-    const mode = $('#gameMode').val();
+    let cfg = getRequestConfig();
+    let modelName = $('#modelSelect').val();
 
-    let modelName = mode === 'pvai' ? $('#singleAiModel').val() :
-        (game.turn() === 'w' ? ($('#aiAssignment').val() === '48_vs_5' ? 'claude-opus-4.8' : 'claude-opus-5') :
-                               ($('#aiAssignment').val() === '48_vs_5' ? 'claude-opus-5' : 'claude-opus-4.8'));
-
-    const turnName = game.turn() === 'w' ? 'Trắng' : 'Đen';
-    updateStatus(`${turnName} (${modelName}) đang suy nghĩ...`);
+    updateStatus(`AI (${modelName}) đang suy nghĩ...`);
     const possibleMoves = game.moves();
     const promptText = `Trạng thái FEN: "${game.fen()}". Nước hợp lệ: [${possibleMoves.join(', ')}]. Chọn 1 nước đi tốt nhất dạng SAN (vd: e4, Nf3). Chỉ trả lời duy nhất mã nước đi.`;
 
-    let authHeaderValue = apiKey.startsWith('Bearer ') ? apiKey : `Bearer ${apiKey}`;
-    log('API_REQ', `Model: ${modelName} | Gửi request qua HTTP Proxy...`);
+    log('API_REQ', `Model: ${modelName} | Gửi request qua Proxy...`);
 
     try {
         const payload = {
             model: modelName,
             messages: [{ role: 'user', content: promptText }],
             temperature: 0.2,
-            target_endpoint: endpoint
+            target_endpoint: cfg.endpoint,
+            api_key: cfg.apiKey,
+            auth_type: cfg.authType
         };
 
         const res = await fetch('/api/chat', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': authHeaderValue
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
 
         const text = await res.text();
-        log('API_RES', `HTTP status: ${res.status}`);
-
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`);
 
         const data = JSON.parse(text);
         let aiMoveStr = data.choices[0].message.content.trim().replace(/['"`]/g, '');
-        log('AI_PARSED_MOVE', `Nước đi AI chọn: "${aiMoveStr}"`);
-
+        
         let move = game.move(aiMoveStr);
         if (!move) {
             const match = possibleMoves.find(m => m.toLowerCase() === aiMoveStr.toLowerCase());
             if (match) move = game.move(match);
         }
         if (!move) {
-            log('WARN', `Nước không hợp lệ, chọn ngẫu nhiên.`);
             move = game.move(possibleMoves[Math.floor(Math.random() * possibleMoves.length)]);
         }
 
         board.position(game.fen());
-        log('MOVE', `${turnName} (${modelName}): ${move.san}`);
-        checkGameState();
+        log('MOVE', `AI đi: ${move.san}`);
+        
+        if (game.in_checkmate()) { updateStatus('Chiếu bí!'); stopGame(); }
+        else if (game.in_draw()) { updateStatus('Hòa!'); stopGame(); }
+        else if (isRunning) { updateStatus('Đến lượt bạn'); }
 
-        if (isRunning && !game.game_over()) {
-            if (mode === 'aivai') aiTimeout = setTimeout(triggerAiMove, 800);
-            else updateStatus('Đến lượt bạn');
-        }
     } catch (err) {
         log('ERROR', `Lỗi: ${err.message}`);
         stopGame();
@@ -286,11 +348,6 @@ async function triggerAiMove() {
 }
 
 $(document).ready(function() {
-    const savedKey = localStorage.getItem('tabi_api_key');
-    const savedEndpoint = localStorage.getItem('tabi_endpoint');
-    if (savedKey) $('#apiKey').val(savedKey);
-    if (savedEndpoint) $('#apiEndpoint').val(savedEndpoint);
-
     board = Chessboard('board', { draggable: false, position: 'start', pieceTheme: chessDotComPieceTheme });
     $('#board').on('click', '.square-55d63', function() {
         const square = $(this).attr('data-square');
@@ -307,27 +364,76 @@ $(document).ready(function() {
 def index():
     return render_template_string(HTML_TEMPLATE)
 
-@app.route('/api/chat', methods=['POST'])
-def proxy_chat():
+def build_auth_header(auth_type, api_key):
+    if auth_type == 'x-api-key':
+        return {"x-api-key": api_key, "Content-Type": "application/json"}
+    else:
+        bearer = api_key if api_key.startswith('Bearer ') else f"Bearer {api_key}"
+        return {"Authorization": bearer, "Content-Type": "application/json"}
+
+@app.route('/api/models', methods=['POST'])
+def api_models():
     try:
-        auth_header = request.headers.get('Authorization', '')
-        payload = request.get_json()
+        data = request.get_json()
+        target_url = data.get('target_endpoint')
+        api_key = data.get('api_key')
+        auth_type = data.get('auth_type', 'Bearer')
 
-        target_url = payload.pop('target_endpoint', '').strip()
-        if not target_url:
-            return jsonify({"error": "Thiếu API Endpoint"}), 400
+        headers = build_auth_header(auth_type, api_key)
+        headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"
 
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": auth_header,
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        chosen_proxy = get_next_proxy()
+        proxies = {"http": chosen_proxy, "https": chosen_proxy}
+
+        response = crequests.get(target_url, headers=headers, proxies=proxies, impersonate="chrome120", timeout=20)
+        return response.text, response.status_code, [('Content-Type', 'application/json')]
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/test', methods=['POST'])
+def api_test():
+    try:
+        data = request.get_json()
+        target_url = data.get('target_endpoint')
+        api_key = data.get('api_key')
+        auth_type = data.get('auth_type', 'Bearer')
+
+        headers = build_auth_header(auth_type, api_key)
+        headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"
+
+        # Gửi test request nhẹ nhàng
+        payload = {
+            "model": "gpt-3.5-turbo", # Hoặc model mặc định bất kỳ
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 5
         }
 
         chosen_proxy = get_next_proxy()
-        proxies = {
-            "http": chosen_proxy,
-            "https": chosen_proxy
-        }
+        proxies = {"http": chosen_proxy, "https": chosen_proxy}
+
+        response = crequests.post(target_url, headers=headers, json=payload, proxies=proxies, impersonate="chrome120", timeout=20)
+        if response.status_code in [200, 400, 404, 422]: # Các mã này chứng tỏ endpoint đã phản hồi hợp lệ qua mạng
+            return jsonify({"status": "ok", "code": response.status_code}), 200
+        return response.text, response.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/chat', methods=['POST'])
+def proxy_chat():
+    try:
+        payload = request.get_json()
+        target_url = payload.pop('target_endpoint', '').strip()
+        api_key = payload.pop('api_key', '').strip()
+        auth_type = payload.pop('auth_type', 'Bearer')
+
+        if not target_url:
+            return jsonify({"error": "Thiếu API Endpoint"}), 400
+
+        headers = build_auth_header(auth_type, api_key)
+        headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"
+
+        chosen_proxy = get_next_proxy()
+        proxies = {"http": chosen_proxy, "https": chosen_proxy}
 
         response = crequests.post(
             target_url,
@@ -344,9 +450,9 @@ def proxy_chat():
                 return response.text, 200, [('Content-Type', 'application/json')]
             except json.JSONDecodeError:
                 snippet = response.text[:300].replace('\n', ' ')
-                return jsonify({"error": f"TabiToken trả về Non-JSON: {snippet}"}), 500
+                return jsonify({"error": f"API trả về Non-JSON: {snippet}"}), 500
 
-        return jsonify({"error": f"TabiToken trả về lỗi HTTP {response.status_code}: {response.text[:200]}"}), 500
+        return jsonify({"error": f"Lỗi HTTP {response.status_code}: {response.text[:200]}"}), 500
 
     except Exception as e:
         return jsonify({"error": f"Lỗi Gateway: {str(e)}"}), 500
