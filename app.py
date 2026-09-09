@@ -462,6 +462,52 @@ function stopGame() {
     updateStatus('Đã dừng');
 }
 
+async function executeAiMoveLogic(model, info, isAiVsAi = false) {
+    const possibleMoves = game.moves();
+    const turn = game.turn();
+    const promptText = isAiVsAi 
+        ? `Current FEN: ${game.fen()}. Legal moves: ${possibleMoves.join(', ')}. Reply with ONLY the best move in SAN format (e.g. e4, Nf3).`
+        : `Current FEN: ${game.fen()}. Legal moves: ${possibleMoves.join(', ')}. Reply with ONLY the best move in SAN format (e.g. e4, Nf3).`;
+
+    const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            model: model,
+            messages: [{ role: 'user', content: promptText }],
+            temperature: 0.1,
+            max_tokens: 15,
+            target_endpoint: info.endpoint,
+            api_key: info.apiKey,
+            auth_type: info.authType
+        })
+    });
+    
+    const text = await res.text();
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`);
+    
+    let data;
+    try {
+        data = JSON.parse(text);
+    } catch(e) {
+        throw new Error("Phản hồi JSON không hợp lệ từ API.");
+    }
+
+    if (!data.choices || !data.choices[0] || !data.choices[0].message || !data.choices[0].message.content) {
+        throw new Error("Cấu trúc phản hồi thiếu trường nội dung (choices[0].message.content).");
+    }
+
+    let aiMoveStr = data.choices[0].message.content.trim().replace(/['"`]/g, '');
+    let move = game.move(aiMoveStr);
+    
+    if (!move) {
+        let matched = game.moves({verbose:true}).find(m => m.san.toLowerCase() === aiMoveStr.toLowerCase() || m.lan.toLowerCase() === aiMoveStr.toLowerCase());
+        if (matched) move = game.move(matched);
+        else move = game.move(game.moves()[0]); // Tự động chọn nước đi hợp lệ đầu tiên nếu AI trả về linh tinh
+    }
+    return move;
+}
+
 async function triggerAiMove(retryCount = 0) {
     if (!isRunning || game.game_over()) return;
     let model = $('#savedModelSelect').val();
@@ -469,36 +515,10 @@ async function triggerAiMove(retryCount = 0) {
     if(!info) { stopGame(); return; }
 
     updateStatus(`AI (${model}) đang suy nghĩ...`);
-    const possibleMoves = game.moves();
-    const promptText = `Current FEN: ${game.fen()}. Legal moves: ${possibleMoves.join(', ')}. Reply with ONLY the best move in SAN format (e.g. e4, Nf3).`;
-
-    log('API_REQ', `Model: ${model} | Gửi request... (Lần thử: ${retryCount + 1})`);
+    log('API_REQ', `Model: ${model} | Gửi request... (Thử: ${retryCount + 1})`);
+    
     try {
-        const res = await fetch('/api/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: model,
-                messages: [{ role: 'user', content: promptText }],
-                temperature: 0.1,
-                max_tokens: 15,
-                target_endpoint: info.endpoint,
-                api_key: info.apiKey,
-                auth_type: info.authType
-            })
-        });
-        const text = await res.text();
-        if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`);
-        const data = JSON.parse(text);
-        
-        let aiMoveStr = data.choices[0].message.content.trim().replace(/['"`]/g, '');
-        let move = game.move(aiMoveStr);
-        if (!move) {
-            let matched = game.moves({verbose:true}).find(m => m.san.toLowerCase() === aiMoveStr.toLowerCase() || m.lan.toLowerCase() === aiMoveStr.toLowerCase());
-            if (matched) move = game.move(matched);
-            else move = game.move(game.moves()[0]);
-        }
-
+        let move = await executeAiMoveLogic(model, info, false);
         board.position(game.fen());
         log('MOVE', `AI đi: ${move.san}`);
         
@@ -508,10 +528,10 @@ async function triggerAiMove(retryCount = 0) {
     } catch (err) {
         log('WARN', `Lỗi mạng/API: ${err.message}`);
         if (retryCount < 2 && isRunning) {
-            log('SYSTEM', `Đang tự động thử lại sau 2 giây (${retryCount + 1}/3)...`);
-            aiTimeout = setTimeout(() => triggerAiMove(retryCount + 1), 2000);
+            log('SYSTEM', `Tự động thử lại sau 1.5 giây (${retryCount + 1}/3)...`);
+            aiTimeout = setTimeout(() => triggerAiMove(retryCount + 1), 1500);
         } else {
-            log('ERROR', 'Đã thử lại nhiều lần nhưng thất bại. Dừng ván đấu.');
+            log('ERROR', 'Thất bại sau nhiều lần thử. Dừng ván đấu.');
             stopGame();
         }
     }
@@ -526,36 +546,10 @@ async function triggerAiVsAiMove(retryCount = 0) {
     if(!info) { stopGame(); return; }
 
     updateStatus(`AI ${turn === 'w' ? 'Trắng' : 'Đen'} (${model}) đang suy nghĩ...`);
-    const possibleMoves = game.moves();
-    const promptText = `Current FEN: ${game.fen()}. Legal moves: ${possibleMoves.join(', ')}. Reply with ONLY the best move in SAN format (e.g. e4, Nf3).`;
-
     log('API_REQ', `AI ${turn === 'w' ? 'Trắng' : 'Đen'} [Model: ${model}] | Gửi request... (Thử: ${retryCount + 1})`);
+    
     try {
-        const res = await fetch('/api/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: model,
-                messages: [{ role: 'user', content: promptText }],
-                temperature: 0.1,
-                max_tokens: 15,
-                target_endpoint: info.endpoint,
-                api_key: info.apiKey,
-                auth_type: info.authType
-            })
-        });
-        const text = await res.text();
-        if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`);
-        const data = JSON.parse(text);
-        
-        let aiMoveStr = data.choices[0].message.content.trim().replace(/['"`]/g, '');
-        let move = game.move(aiMoveStr);
-        if (!move) {
-            let matched = game.moves({verbose:true}).find(m => m.san.toLowerCase() === aiMoveStr.toLowerCase() || m.lan.toLowerCase() === aiMoveStr.toLowerCase());
-            if (matched) move = game.move(matched);
-            else move = game.move(game.moves()[0]);
-        }
-
+        let move = await executeAiMoveLogic(model, info, true);
         board.position(game.fen());
         log('MOVE', `AI ${turn === 'w' ? 'Trắng' : 'Đen'} đi: ${move.san}`);
         
@@ -567,11 +561,18 @@ async function triggerAiVsAiMove(retryCount = 0) {
     } catch (err) {
         log('WARN', `Lỗi AI vs AI: ${err.message}`);
         if (retryCount < 2 && isRunning) {
-            log('SYSTEM', 'Tự động thử lại lượt đi sau 2 giây...');
-            aiTimeout = setTimeout(() => triggerAiVsAiMove(retryCount + 1), 2000);
+            log('SYSTEM', 'Tự động thử lại lượt đi sau 1.5 giây...');
+            aiTimeout = setTimeout(() => triggerAiVsAiMove(retryCount + 1), 1500);
         } else {
-            log('ERROR', 'Thất bại sau nhiều lần thử. Dừng ván.');
-            stopGame();
+            log('ERROR', 'Thất bại liên tục, tự động bốc nước đi dự phòng để tiếp tục trận đấu.');
+            try {
+                let fallbackMove = game.move(game.moves()[0]);
+                board.position(game.fen());
+                log('MOVE', `[DỰ PHÒNG] AI ${turn === 'w' ? 'Trắng' : 'Đen'} đi: ${fallbackMove.san}`);
+                if (isRunning) aiTimeout = setTimeout(triggerAiVsAiMove, 300);
+            } catch(e) {
+                stopGame();
+            }
         }
     }
 }
@@ -738,7 +739,6 @@ def proxy_chat():
         chosen_proxy = get_next_proxy()
         proxies = {"http": chosen_proxy, "https": chosen_proxy}
 
-        # Giảm timeout xuống 25s để phản hồi nhanh và chủ động bắt lỗi
         response = crequests.post(chat_url, headers=headers, json=payload, proxies=proxies, impersonate="chrome120", timeout=25, allow_redirects=False)
         if response.status_code == 200:
             return jsonify(response.json()), 200
